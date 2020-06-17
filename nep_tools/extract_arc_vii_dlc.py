@@ -228,8 +228,8 @@ def extract_arc_file(path: str):
             out = open(out_path, 'wb')  # Starts from a fresh empty file
             out.write(f.read(af.size))
             # out.flush()  # Closing probably ensures that it is flushed anyway
-            f.close()
             out.close()
+    f.close()
 
 
 if __name__ == "__main__":
