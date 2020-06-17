@@ -77,6 +77,7 @@ class BlenderOperator_ISM2_import(bpy.types.Operator):
                                              default=False)
 
     def invoke(self, context, event):
+        self.directory = "C:\\Program Files (x86)\\Steam\\steamapps\\common"
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 

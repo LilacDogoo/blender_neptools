@@ -29,6 +29,7 @@ from typing import List
 import bpy
 
 import nep_tools
+from nep_tools import file_ism2
 from nep_tools.utils import binary_file
 
 DEFAULT_VII_DLC_PATH = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\DLC\\"
@@ -77,6 +78,7 @@ class BlenderOperator_ARC_Extractor(bpy.types.Operator):
     filter_glob: bpy.props.StringProperty(default="*.arc", options={'HIDDEN'})
 
     def invoke(self, context, event):
+        self.directory = DEFAULT_VII_DLC_PATH
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
