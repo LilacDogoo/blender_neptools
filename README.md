@@ -35,8 +35,8 @@ I did not automate this completely, as of yet.
 <li>extract 'cl3' file collections
 <li>convert 'tid' files to 'png' files
 </ul>
-Blender should do the rest from there. (aside from some face texture problems)
-<br>Some links to help you:
+<p>Blender should do the rest from there.
+<p>Some links to help you:
 <ul>
 <li>Hyperdimension Neptunia Re;Birth 1 & 2  >  https://steamcommunity.com/sharedfiles/filedetails/?id=453717187
 <li>Megadimension Neptunia Victory II  >  https://github.com/MysteryDash/Dash.FileFormats
