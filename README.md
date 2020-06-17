@@ -1,6 +1,6 @@
 # blender_neptools
 <p>A set of Blender tools to Import and Export to the Neptunia Games
-<p>Use the ZIP file to quickly install to Blender.
+<p><b>Use the ZIP file</b> to quickly install to Blender.
   <br>No need to unzip it.
   <br>Navigate to 'Edit > Preferences > Add-ons'. Use the install button here.
 
