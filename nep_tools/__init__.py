@@ -4,12 +4,12 @@ Author: LilacDogoo
 
 import datetime
 
-lastUpdated = datetime.datetime(2020, 4, 10)
+lastUpdated = datetime.datetime(2020, 6, 16)
 bl_info = {
     "name": "NepTools",
     "author": "LilacDogoo",
     "version": (1, 0, 0),
-    "blender": (2, 82, 0),
+    "blender": (2, 83, 0),
     "category": "Import-Export",
     "location": "File > Import",
     "description": "Importer for ISM2 files from the Neptunia games."
