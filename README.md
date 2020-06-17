@@ -19,6 +19,7 @@
 
 
 <h1>Importing from ISM2</h1>
+Blender Menus -> 'File > Import > Neptunia Models (.ism2)'
 <h2>CREDIT</h2>
 <b>Random Talking Brush, howie</b>
 <br>This script was written by me (LilacDogoo) based on a 3ds Max script written by Random Talking Bush.
@@ -26,7 +27,7 @@
 <br>If you use it, consider giving thanks to Idea Factory, Compile Heart, howfie, Random Talking Bush, and myself.
 
 
-<h2>REMEMBER<h2>
+<h2>REMEMBER</h2>
 I did not automate this completely, as of yet.
 <p>You must do this yourself:
 <ul>
@@ -58,7 +59,7 @@ Currently only tested against 'Megadimension Neptunia VII' arc files. May work w
 <li>In this case we can see that 'Uzume Swimsuit Set' is listed under 'DLC000000000009500000'
 <li>Blender Menus -> 'NepTools > Extract Arc File' (locate 'DLC000000000009500000').
   <br>A folder was created with the same name and location of the arc file.
-<li>Blender Menus -> 'File > Import > ISM2 Importer (Neptunia)' (locate the ISM2 file within the extracted files).
+<li>Blender Menus -> 'NepTools > ISM2 Importer (Neptunia)' (locate the ISM2 file within the extracted files).
 
 <b>REMEMBER</b> I did not automate this completely as of yet. You must convert 'tid's to 'png's yourself.
     After that Blender will find them and apply them to your model for you.
