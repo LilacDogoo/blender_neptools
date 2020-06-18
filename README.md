@@ -10,6 +10,7 @@
 <li>Hyperdimension Neptunia Re;Birth2
 <li>Hyperdimension Neptunia Re;Birth3
 <li>Megadimension Neptunia VII
+<li>Superdimension Neptune VS Sega Hard Girls
 </ul>
 
 <p>Some face textures will fail. I assume it has to do with the way the faces are animated.
