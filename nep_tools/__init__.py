@@ -21,6 +21,7 @@ debug = False
 if "bpy" in locals():
     import importlib
     import nep_tools
+
     importlib.reload(nep_tools.utils.binary_file)
     importlib.reload(nep_tools.utils.matrix4f)
     importlib.reload(nep_tools.import_to_blender)
@@ -80,4 +81,3 @@ def unregister():
     # Unregister classes
     for cls in _classes:
         bpy.utils.unregister_class(cls)
-
