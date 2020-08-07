@@ -75,11 +75,18 @@ class Bones(List[Bone]):
         i = len(self.bones_by_id) - 1
         while self.bones_by_id[i] < 0:
             i -= 1
+            if i < 0:  # no bones have any IDs
+                self.bones_by_id = None
+                return
         self.bones_by_id = self.bones_by_id[0:i + 1]
 
     def get_by_id(self, bone_id: int) -> Bone:
+        if bone_id == None:
+            print("BoneID's don't exist")
+            return None
         if bone_id < 0 or bone_id >= len(self.bones_by_id):
-            print("OOR: %s" % bone_id)
+            print("BoneID Out Of Range: %s" % bone_id)
+            return None
         return self[self.bones_by_id[bone_id]]
 
 
@@ -148,7 +155,7 @@ class Face:
 class FaceAnm:
     def __init__(self, face_anm: str) -> None:
         super().__init__()
-        self.face_anm: str = face_anm  # TODO for now just a simple long string
+        self.face_anm: str = face_anm  # Todo: for now just a simple long string
 
 
 class MotionFrame:
@@ -194,11 +201,11 @@ class Motion:
 class PreBlender_Model:
     def __init__(self) -> None:
         super().__init__()
+        self.name: str = ""
 
         # Buffers
         self.strings: List[str] = []
-        self.armature_name: str = ""
-        self.bones: Bones
+        self.bones: Bones = None
         self.textures: List[Texture] = []
         self.materials: List[Material] = []
         self.surfaces: List[Surface] = []
@@ -209,14 +216,14 @@ class PreBlender_Model:
         self.motions: List[Motion] = []
 
     def getName(self):
-        return self.armature_name
+        return self.name
 
 
 def to_blender(model: PreBlender_Model,
                option_cull_back_facing: bool = True,
                option_merge_vertices: bool = False,
                option_import_location=(0, 0, 0)):
-    # TODO Merge Vertices if option is enabled - Process Heavy
+    # Todo: Merge Vertices if option is enabled - Process Heavy
     #     Maybe this should move to the 'PreBlender_Model' class.
     #     Maybe this should be done after imported into Blender to take advantage of it effieciency.
     #   The goal here is to merge as much as possible while saving the double sided geometry.
@@ -224,7 +231,7 @@ def to_blender(model: PreBlender_Model,
     #   Blender does not actually support double sided geometry so if you merge with all vertices
     #     selected then you will lose all the double sided geometry.
     #
-    # TODO Try to make more efficient
+    # Todo: Try to make more efficient
     #
     # model.vertices_merged: List[model_types.Vertex] = []
     # model.faces_merged_verts: List[model_types.Face] = []
@@ -262,30 +269,32 @@ def to_blender(model: PreBlender_Model,
     blender_object: bpy.types.Object = bpy.data.objects.new(model.getName(), blender_mesh)
 
     # Armature
-    blender_armature: bpy.types.Armature = bpy.data.armatures.new(model.getName())
-    blender_object_armature: bpy.types.Object = bpy.data.objects.new(model.getName() + " Armature", blender_armature)
-    bpy.context.scene.collection.objects.link(blender_object_armature)
-    bpy.context.view_layer.objects.active = blender_object_armature
-    bpy.ops.object.mode_set(mode='EDIT', toggle=False)
-    eb: bpy.types.ArmatureEditBones = blender_armature.edit_bones
+    hasArmature: bool = model.bones is not None
+    if hasArmature:
+        blender_armature: bpy.types.Armature = bpy.data.armatures.new(model.getName())
+        blender_object_armature: bpy.types.Object = bpy.data.objects.new(model.getName() + " Armature", blender_armature)
+        bpy.context.scene.collection.objects.link(blender_object_armature)
+        bpy.context.view_layer.objects.active = blender_object_armature
+        bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+        eb: bpy.types.ArmatureEditBones = blender_armature.edit_bones
 
-    blender_bones = []  # Need this to reference bones added to Blender
-    for B in model.bones:
-        blender_bone: bpy.types.EditBone = eb.new(B.name)
-        blender_bones.append(blender_bone)
-        blender_bone.parent = blender_bones[B.parentid] if B.parentid >= 0 else None
+        blender_bones = []  # Need this to reference bones added to Blender
+        for B in model.bones:
+            blender_bone: bpy.types.EditBone = eb.new(B.name)
+            blender_bones.append(blender_bone)
+            blender_bone.parent = blender_bones[B.parentid] if B.parentid >= 0 else None
 
-        m: Matrix4f = B.transform
-        blender_bone.head = (0.0, 0.0, 0.0)
-        blender_bone.tail = (0.0, 0.02, 0.0)
-        blender_bone.transform(m.toBlenderMatrix())
+            m: Matrix4f = B.transform
+            blender_bone.head = (0.0, 0.0, 0.0)
+            blender_bone.tail = (0.0, 0.02, 0.0)
+            blender_bone.transform(m.toBlenderMatrix())
 
-    bpy.ops.object.mode_set()
-    blender_armature.display_type = 'STICK'
-    # TODO
-    blender_armature.show_names = False  # True
-    blender_object_armature.show_in_front = True
-    blender_armature.show_axes = True
+        bpy.ops.object.mode_set()
+        blender_armature.display_type = 'STICK'
+
+        blender_armature.show_names = False  # True
+        blender_object_armature.show_in_front = True
+        blender_armature.show_axes = True
 
     blender_bMesh: bmesh.types.BMesh = bmesh.new()
     blender_bMesh.from_mesh(blender_mesh)
@@ -294,7 +303,8 @@ def to_blender(model: PreBlender_Model,
     # Add Data to Face Loops (UV, Color)
     blender_bMesh_uvLayer = blender_bMesh.loops.layers.uv.new()
     blender_bMesh_colorLayer = blender_bMesh.loops.layers.color.new()
-    blender_bmesh_weight_layer = blender_bMesh.verts.layers.deform.new()
+    if hasArmature:
+        blender_bmesh_weight_layer = blender_bMesh.verts.layers.deform.new()
 
     # Create Vertices
     blender_bMesh_verts = []  # Need to access this to create faces
@@ -303,17 +313,19 @@ def to_blender(model: PreBlender_Model,
     blender_bMesh.verts.index_update()
 
     # Create Vertex Groups
-    for current_bone_id in model.bones.bones_by_id:
-        blender_object.vertex_groups.new(name=model.bones[current_bone_id].name)
+    if model.bones.bones_by_id is not None:
+        for current_bone_id in model.bones.bones_by_id:
+            blender_object.vertex_groups.new(name=model.bones[current_bone_id].name)
 
     # Set Vertex Weights
-    for vert in blender_bMesh.verts:
-        # print("Vertex: %s    Vertex Bone ID: %s   BoneWeight: %s" % (i, model.vertex_bones[i], model.vertex_bone_weights[i]))
-        dvert = vert[blender_bmesh_weight_layer]
-        for bone_weight_link in model.vertices[vert.index].boneWeights:
-            dvert[bone_weight_link.bone_id] = bone_weight_link.bone_weight
+    if hasArmature:
+        for vert in blender_bMesh.verts:
+            # print("Vertex: %s    Vertex Bone ID: %s   BoneWeight: %s" % (i, model.vertex_bones[i], model.vertex_bone_weights[i]))
+            dvert = vert[blender_bmesh_weight_layer]
+            for bone_weight_link in model.vertices[vert.index].boneWeights:
+                dvert[bone_weight_link.bone_id] = bone_weight_link.bone_weight
 
-    # TODO Smoothing Groups ?? Do I need ??
+    # Todo: Smoothing Groups ?? Do I need ??
 
     # Create Faces
     # I think you can send any tuple size greater than 2
@@ -338,7 +350,7 @@ def to_blender(model: PreBlender_Model,
     blender_bMesh.to_mesh(blender_mesh)
     blender_bMesh.free()
 
-    # Some Mesh Data must be added after conversion to Mesh from BMesh
+    # Some Mesh Data must be added after conversion from BMesh to Mesh
 
     # Assign Normals
     blender_mesh.use_auto_smooth = True
@@ -352,15 +364,16 @@ def to_blender(model: PreBlender_Model,
     blender_mesh.normals_split_custom_set(blender_normals)
     # blender_mesh.normals_split_custom_set([c.normal for c in model.vertices])  # Old way - works with models that do not reuse vertices
 
-    # TODO There is more to these shaders but this is all I am doing for now
+    # Todo: There is more to these shaders but this is all I am doing for now
     # Assign Materials (Use the surfaces to create Blender Materials)
     blender_images: List[bpy.types.Image] = bpy.data.images
     r = random.Random()
-    if nep_tools.debug:
-        for surface in model.surfaces:
-            print(surface)
-    for surface in model.surfaces:
-        material: bpy.types.Material = bpy.data.materials.new("%s__%s" % (model.materials[surface.material].name, surface.name))
+
+    # if nep_tools.debug:
+    #     for surface in model.surfaces:
+    #         print(surface)
+    def addMaterialToObject(mat: Material, mat_name: str):
+        material: bpy.types.Material = bpy.data.materials.new("%s__%s" % (mat.name, mat_name))
         material.diffuse_color = (r.random(), r.random(), r.random(), 1.0)
         material.use_backface_culling = option_cull_back_facing
         material.use_nodes = True
@@ -370,10 +383,10 @@ def to_blender(model: PreBlender_Model,
 
         if len(model.materials) > 0:  # IF option_load_textures
             nodes_texture_diffuse: bpy.types.Node = nodes.new('ShaderNodeTexImage')
-            nodes_texture_diffuse.label = model.materials[surface.material].texture_name  # Diffuse Texture Name
+            nodes_texture_diffuse.label = mat.texture_name  # Diffuse Texture Name
             nodes_texture_diffuse.location = (node_bsdf.location[0] - nodes_texture_diffuse.width - 50, node_bsdf.location[1])
 
-            F = model.materials[surface.material].texture_path  # Filepath of image to add to blender
+            F = mat.texture_path  # Filepath of image to add to blender
             if os.path.isfile(F):
                 found_image: bool = False
                 for bimage in bpy.data.images:  # Check if image with this filepath already exists in blender
@@ -388,12 +401,22 @@ def to_blender(model: PreBlender_Model,
 
         blender_mesh.materials.append(material)
 
+    # if surfaces exist add materials by surface. More complex model rely on the surface to point to the correct material
+    if len(model.surfaces) > 0:
+        for surface in model.surfaces:
+            addMaterialToObject(model.materials[surface.material], surface.name)
+    else:
+        for mat in model.materials:
+            addMaterialToObject(mat, mat.name)
+
     # Place in Scene
-    blender_object_armature.location = option_import_location
+    if hasArmature:
+        blender_object_armature.location = option_import_location
     bpy.context.scene.collection.objects.link(blender_object)
     bpy.ops.object.mode_set()
-    blender_object.parent = blender_object_armature
-    blender_object.modifiers.new(name="Armature", type='ARMATURE').object = blender_object_armature
+    if hasArmature:
+        blender_object.parent = blender_object_armature
+        blender_object.modifiers.new(name="Armature", type='ARMATURE').object = blender_object_armature
 
     # Bounding Boxes
     if model.bounding_box is not None:
@@ -433,16 +456,16 @@ def to_blender(model: PreBlender_Model,
         text_block: bpy.types.Text = bpy.data.texts.new(model.getName() + "_face.anm")
         text_block.from_string(model.face_anm)
 
-    # Motion
-    if model.motions is not None:
-        # TODO determine what rotation_method ISM2 used and then apply it to the bones upon creation of those bones.
-        for motion in model.motions:
-            action: bpy.types.Action = bpy.data.actions.new(motion.name)
-            action.frame_range = (0, motion.duration)
-            for bone in motion.motion_bones:
-                fcx: bpy.types.FCurve = action.fcurves.new(datapath="pose.bones[\"%s\"]" % bone.bone_name, index=0)
-                fcy: bpy.types.FCurve = action.fcurves.new(datapath="pose.bones[\"%s\"]" % bone.bone_name, index=1)
-                fcz: bpy.types.FCurve = action.fcurves.new(datapath="pose.bones[\"%s\"]" % bone.bone_name, index=2)
-                kp: bpy.types.Keyframe
-                # fcx.keyframe_points.add()
-        pass
+    # Todo: Motion
+    # if model.motions is not None:
+    #     # TODO determine what rotation_method ISM2 used and then apply it to the bones upon creation of those bones.
+    #     for motion in model.motions:
+    #         action: bpy.types.Action = bpy.data.actions.new(motion.name)
+    #         action.frame_range = (0, motion.duration)
+    #         for bone in motion.motion_bones:
+    #             fcx: bpy.types.FCurve = action.fcurves.new(datapath="pose.bones[\"%s\"]" % bone.bone_name, index=0)
+    #             fcy: bpy.types.FCurve = action.fcurves.new(datapath="pose.bones[\"%s\"]" % bone.bone_name, index=1)
+    #             fcz: bpy.types.FCurve = action.fcurves.new(datapath="pose.bones[\"%s\"]" % bone.bone_name, index=2)
+    #             kp: bpy.types.Keyframe
+    #             # fcx.keyframe_points.add()
+    #     pass
