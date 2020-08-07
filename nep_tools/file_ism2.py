@@ -10,7 +10,7 @@ The 3ds Max script written by Random Talking Bush is based on the LightWave impo
 If you use it, consider giving thanks to Idea Factory, Compile Heart, howfie, Random Talking Bush, and myself.
 
 
-REMEMBER: I did not automate this completely as of yet.
+REMEMBER: I did not automate this completely, as of yet.
     You must do this yourself:
       • extract 'pac' file collections
       • extract 'cl3' file collections
@@ -131,9 +131,10 @@ def read_ism2(filepath: str, filename: str,
     # Check Endian -- This is the section count, which will obviously always have a low positive integer
     # Stream Reader Functions :: Some are created based on endian
     f.seek(0x14)
-    R: binary_file.LD_BinaryReader = binary_file.LD_BinaryReader(f, 0 < binary_file.struct_ULongL.unpack_from(f.read(4))[0] < 65535)
+    R: binary_file.LD_BinaryReader = binary_file.LD_BinaryReader(f, not (0 < binary_file.struct_ULongL.unpack_from(f.read(4))[0] < 0x10000))
 
     model = nep_tools.import_to_blender.PreBlender_Model()
+    model.name = filename
     bboxCount = 0
     degTOrad = math.pi / 180
 
@@ -358,9 +359,9 @@ def read_ism2(filepath: str, filename: str,
                 # Bone Header 2: How many attributes this bone has
                 bone_attribute_count = R.read_long_unsigned()
 
-                # Bone Header 3: String ID (This file contains an array of Strings)
+                # Bone Header 3: String ID
                 bone_name1_string_id = R.read_long_unsigned()
-                # Bone Header 4: String ID (This file contains an array of Strings)
+                # Bone Header 4: String ID
                 # bone_name2_string_id = R.read_long_unsigned()
 
                 # Bone Header 5: Unknown
@@ -575,7 +576,7 @@ def read_ism2(filepath: str, filename: str,
 
                     elif bone_attribute_type == 0x4C:  # Type 76 # Bone Attribute: Surfaces
                         # This is the only bone that contains surfaces, it also has the name of the model
-                        model.armature_name = current_bone.name
+                        model.name = current_bone.name
 
                         # bone_attribute_surfaces_header_length = R.read_long_unsigned()
                         R.seek(4)
@@ -621,14 +622,14 @@ def read_ism2(filepath: str, filename: str,
                         if nep_tools.debug: print("      Bone Attribute Type %s == %s  <not-implemented>  @ %s" % (hex(bone_attribute_type), bone_attribute_type, hex(bone_attribute_offset_array[current_bone_attribute]).rjust(6)))
                 model.bones.append(current_bone)
                 if nep_tools.debug: print(current_bone)
-            # After all bones are added, trim this list to cut down on a bit of proccessing
+                # After all bones are added, trim this list to cut down on a bit of proccessing
             model.bones.trim()
 
         elif current_file_section_type == 0x32:  # 50 #
             R.seek(8)
             something_count = R.read_long_unsigned()
             if nep_tools.debug:
-                print("\n  File Section Type %s == %s   @ %s Somethings  %s  <incomplete>" %
+                print("\n  File Section Type %s == %s   @ %s Something[Count:%s]  <not-implemented>" %
                       (hex(file_section_type_array[current_file_section]), file_section_type_array[current_file_section],
                        hex(current_file_section_offset), something_count))
 
@@ -807,7 +808,7 @@ def read_ism2(filepath: str, filename: str,
                             if nep_tools.debug:
                                 print("      Mesh Surface: Indices @ %s  SectionCount %s  FaceLoopCount %s   Blank: %s   Header4: %s   Header5: %s   Surface: %s" % (
                                     hex(current_mesh_section_offset), mesh_surface_section_count, face_loop_count,
-                                    mesh_surface_section_blank, mesh_surface_section_header4, mesh_surface_section_header5, mesh_surface_object.name))
+                                    mesh_surface_section_blank, mesh_surface_section_header4, mesh_surface_section_header5, mesh_surface_object.name if hasattr(mesh_surface_object, 'name') else "\'noName\'"))
 
                             mesh_surface_section_offset_array = []
                             for mesh_surface_section_current in range(mesh_surface_section_count):
@@ -879,148 +880,149 @@ def read_ism2(filepath: str, filename: str,
                                         ("%.4f" % max_y).rjust(10),
                                         ("%.4f" % max_z).rjust(10)))
 
-        elif current_file_section_type == 0x34:  # 52 # Armature Animations
-            # armature_animations_block_type  # Duplicate Data
-            # armature_animations_header_length  # Always the same
-            R.seek(0x08)  # skip block_type and header_length
-            animation_bone_count = R.read_long_unsigned()
-            # armature_animations_header03  # * Unknown
-            # armature_animations_header04  # * Unknown
-            R.seek(0x08)
-            animation_duration = R.read_float()  # float Unknown
-            # armature_animations_header06  # float Unknown
-            # armature_animations_header07  # long Unknown
-            R.seek(0x08)
-
-            mo_ = import_to_blender.Motion(filename, animation_duration)
-
-            if nep_tools.debug:
-                print("\n  File Section Type %s == %s  @ %s  'Animation Bones'  Count %i   Duration: %s" % (hex(current_file_section_type), current_file_section_type, hex(current_file_section_offset), animation_bone_count, animation_duration))
-
-            armature_animations_offset_array: List[int] = []
-            for current_armature_animation in range(animation_bone_count):
-                armature_animations_offset_array.append(R.read_long_unsigned())
-
-            for current_armature_animation_bone_number, current_armature_animation_bone_offset in enumerate(armature_animations_offset_array):
-                R.goto(current_armature_animation_bone_offset)
-
-                armature_animation_bone = R.read_long_unsigned()
-
-                if armature_animation_bone == 0x50:  # 80 # Animation Bone
-                    # armature_animation_attribute_header_length  # always the same
-                    R.seek(4)  # Skip header length
-                    armature_animation_bone_count = R.read_long_unsigned()
-                    armature_animation_bone_name_index = R.read_long_unsigned()
-
-                    mo_bone = import_to_blender.MotionBone(model.strings[armature_animation_bone_name_index])
-
-                    print("    Armature Animation Bone %s  Type 0x50 == 80   @ %s    %s   Bone: %s" % (
-                        current_armature_animation_bone_number,
-                        hex(current_armature_animation_bone_offset).rjust(7),
-                        str(armature_animation_bone_count).rjust(2), model.strings[armature_animation_bone_name_index].rjust(3)))
-
-                    R.goto(current_armature_animation_bone_offset + 0x20)
-                    armature_animation_bone_offset_array = []
-                    for current_animation_bone_attribute in range(armature_animation_bone_count):
-                        armature_animation_bone_offset_array.append(R.read_long_unsigned())
-                    for current_animation_bone_attribute_number, current_animation_bone_attribute_offset in enumerate(armature_animation_bone_offset_array):
-                        R.goto(current_animation_bone_attribute_offset)
-                        armature_animation_bone_attribute_type = R.read_long_unsigned()
-
-                        mo_type = import_to_blender.MotionType()
-
-                        if armature_animation_bone_attribute_type == 0x0F:  # 15 # Dunno yet
-                            # header length  # always 0x40
-                            # count  # always 1
-                            # armature_animation_bone_attribute_header03 = R.read_long_unsigned()  # always 0
-                            # armature_animation_bone_attribute_header04 = R.read_long_unsigned()  # always 0
-                            # armature_animation_bone_attribute_header05 = R.read_long_unsigned()  # always 0
-                            # armature_animation_bone_attribute_header06 = R.read_long_unsigned()  # always 0
-                            # armature_animation_bone_attribute_header07 = R.read_long_unsigned()  # always 0
-                            # armature_animation_bone_attribute_header08 = R.read_long_unsigned()  # always 73
-                            # armature_animation_bone_attribute_header09 = R.read_long_unsigned()  # always 0
-                            R.seek(36)
-                            armature_animation_bone_attribute_header10 = R.read_long_unsigned()  # name of bone
-                            armature_animation_bone_attribute_header11 = R.read_long_unsigned()
-                            armature_animation_bone_attribute_header12a = R.read_short_unsigned()
-                            # armature_animation_bone_attribute_header12b = R.read_short_unsigned()  # always 6
-                            # armature_animation_bone_attribute_header13 = R.read_long_unsigned()  # always 0
-                            # armature_animation_bone_attribute_header14 = R.read_long_unsigned()  # always 0
-                            # armature_animation_bone_attribute_header15 = R.read_long_unsigned()  # always 0
-                            R.seek(14)
-
-                            if nep_tools.debug:
-                                print("      AnimBoneAttrib %s:  %s   %s %s %s" % (
-                                    current_animation_bone_attribute_number,
-                                    hex(current_animation_bone_attribute_offset).rjust(10),
-                                    model.strings[armature_animation_bone_attribute_header10].ljust(20),
-                                    armature_animation_bone_attribute_header11,
-                                    armature_animation_bone_attribute_header12a))
-
-                            armature_animation_bone_type2 = R.read_long_unsigned()
-                            if armature_animation_bone_type2 == 0x44:  # 68 # Dunno yet
-                                # header length  # always 0x20
-                                R.seek(4)  # skip header length
-                                armature_animation_bone_4byte_block_length = R.read_long_unsigned()  # Total Length of Block in 4-bytes
-                                # armature_animation_bone_type2_header03 = R.read_long_unsigned()  # always 0
-                                R.seek(4)
-                                armature_animation_bone_type2_header04a = R.read_short_unsigned()
-                                # armature_animation_bone_type2_header04b = R.read_short_unsigned()  # always 1
-                                R.seek(2)
-                                armature_animation_bone_4byte_entry_length = R.read_long_unsigned()  # Length of each entry in 4-bytes
-                                # armature_animation_bone_type2_header06 = R.read_long_unsigned()  # always 0
-                                # armature_animation_bone_type2_header07 = R.read_long_unsigned()  # always 0
-                                R.seek(8)
-
-                                armature_animation_frame_count = armature_animation_bone_4byte_block_length // armature_animation_bone_4byte_entry_length
-
-                                if nep_tools.debug:
-                                    print("        AnimBoneAttrib2:  %s %s %s   Length: %s" % (
-                                        str(armature_animation_bone_4byte_block_length).rjust(3), armature_animation_bone_type2_header04a,
-                                        str(armature_animation_bone_4byte_entry_length).rjust(2), armature_animation_frame_count))
-
-                                if armature_animation_bone_type2_header04a == 0x0C:  # 12 # float array (probably vertices or matrices)
-                                    for _ in range(armature_animation_frame_count):
-                                        armature_animation_keyframe_time_stamp = R.read_float()
-                                        armature_animation_keyframe_type1 = R.read_short_unsigned()
-                                        armature_animation_keyframe_type2 = R.read_short_unsigned()
-                                        armature_animation_keyframe_data: List[float] = []
-                                        for __ in range(armature_animation_bone_4byte_entry_length - 2):
-                                            armature_animation_keyframe_data.append(R.read_float())
-
-                                        mo_type.motion_data.append(import_to_blender.MotionFrame(armature_animation_keyframe_time_stamp, armature_animation_keyframe_data))
-
-                                        if nep_tools.debug:
-                                            print("        Keyframe %s  Type %s %s" % (armature_animation_keyframe_time_stamp, armature_animation_keyframe_type1, armature_animation_keyframe_type2))
-                                            print("          (%s)" % ", ".join([("%.4f" % _s_).rjust(7) for _s_ in armature_animation_keyframe_data]))
-                                elif armature_animation_bone_type2_header04a == 0x12:  # 18 # I have no idea what this is yet
-                                    for _ in range(armature_animation_frame_count):
-                                        armature_animation_keyframe_time_stamp = R.read_half_float()
-                                        armature_animation_keyframe_type = R.read_short_unsigned()
-                                        armature_animation_keyframe_data = []
-                                        for __ in range(armature_animation_bone_4byte_entry_length - 2):
-                                            armature_animation_keyframe_data.append(R.read_half_float())
-
-                                        mo_type.motion_data.append(import_to_blender.MotionFrame(armature_animation_keyframe_time_stamp, armature_animation_keyframe_data))
-
-                                        if nep_tools.debug:
-                                            print("        Keyframe????? %s  Type %s" % (("%.3f" % armature_animation_keyframe_time_stamp).rjust(6), armature_animation_keyframe_type))
-                                            print("          (%s)" % ", ".join([str(_s_) for _s_ in armature_animation_keyframe_data]))
-                                else:
-                                    if nep_tools.debug:
-                                        print("armature_animation_bone_type2_header04a == %s == %s   <not supported>" % (hex(armature_animation_bone_type2_header04a), armature_animation_bone_type2_header04a))
-                            else:
-                                if nep_tools.debug:
-                                    print("        AnimBoneAttrib2: Type %s <not implemented>" % armature_animation_bone_type2)
-                        else:
-                            if nep_tools.debug:
-                                print("Armature Animation Type %s == %s <not implemented>" % (hex(current_animation_bone_attribute_offset).rjust(10), current_animation_bone_attribute_offset))
-                        mo_bone.motion_types.append(mo_type)
-                else:
-                    if nep_tools.debug:
-                        print("    Armature Animation Attribute Type %i == Unknown @ %s" % (armature_animation_bone, hex(current_armature_animation_bone_offset)))
-                mo_.motion_bones.append(mo_bone)
-            model.motions.append(mo_)
+        # TODO Animations
+        # elif current_file_section_type == 0x34:  # 52 # Armature Animations
+        #     # armature_animations_block_type  # Duplicate Data
+        #     # armature_animations_header_length  # Always the same
+        #     R.seek(0x08)  # skip block_type and header_length
+        #     animation_bone_count = R.read_long_unsigned()
+        #     # armature_animations_header03  # * Unknown
+        #     # armature_animations_header04  # * Unknown
+        #     R.seek(0x08)
+        #     animation_duration = R.read_float()  # float Unknown
+        #     # armature_animations_header06  # float Unknown
+        #     # armature_animations_header07  # long Unknown
+        #     R.seek(0x08)
+        #
+        #     mo_ = import_to_blender.Motion(filename, animation_duration)
+        #
+        #     if nep_tools.debug:
+        #         print("\n  File Section Type %s == %s  @ %s  'Animation Bones'  Count %i   Duration: %s" % (hex(current_file_section_type), current_file_section_type, hex(current_file_section_offset), animation_bone_count, animation_duration))
+        #
+        #     armature_animations_offset_array: List[int] = []
+        #     for current_armature_animation in range(animation_bone_count):
+        #         armature_animations_offset_array.append(R.read_long_unsigned())
+        #
+        #     for current_armature_animation_bone_number, current_armature_animation_bone_offset in enumerate(armature_animations_offset_array):
+        #         R.goto(current_armature_animation_bone_offset)
+        #
+        #         armature_animation_bone = R.read_long_unsigned()
+        #
+        #         if armature_animation_bone == 0x50:  # 80 # Animation Bone
+        #             # armature_animation_attribute_header_length  # always the same
+        #             R.seek(4)  # Skip header length
+        #             armature_animation_bone_count = R.read_long_unsigned()
+        #             armature_animation_bone_name_index = R.read_long_unsigned()
+        #
+        #             mo_bone = import_to_blender.MotionBone(model.strings[armature_animation_bone_name_index])
+        #
+        #             print("    Armature Animation Bone %s  Type 0x50 == 80   @ %s    %s   Bone: %s" % (
+        #                 current_armature_animation_bone_number,
+        #                 hex(current_armature_animation_bone_offset).rjust(7),
+        #                 str(armature_animation_bone_count).rjust(2), model.strings[armature_animation_bone_name_index].rjust(3)))
+        #
+        #             R.goto(current_armature_animation_bone_offset + 0x20)
+        #             armature_animation_bone_offset_array = []
+        #             for current_animation_bone_attribute in range(armature_animation_bone_count):
+        #                 armature_animation_bone_offset_array.append(R.read_long_unsigned())
+        #             for current_animation_bone_attribute_number, current_animation_bone_attribute_offset in enumerate(armature_animation_bone_offset_array):
+        #                 R.goto(current_animation_bone_attribute_offset)
+        #                 armature_animation_bone_attribute_type = R.read_long_unsigned()
+        #
+        #                 mo_type = import_to_blender.MotionType()
+        #
+        #                 if armature_animation_bone_attribute_type == 0x0F:  # 15 # Dunno yet
+        #                     # header length  # always 0x40
+        #                     # count  # always 1
+        #                     # armature_animation_bone_attribute_header03 = R.read_long_unsigned()  # always 0
+        #                     # armature_animation_bone_attribute_header04 = R.read_long_unsigned()  # always 0
+        #                     # armature_animation_bone_attribute_header05 = R.read_long_unsigned()  # always 0
+        #                     # armature_animation_bone_attribute_header06 = R.read_long_unsigned()  # always 0
+        #                     # armature_animation_bone_attribute_header07 = R.read_long_unsigned()  # always 0
+        #                     # armature_animation_bone_attribute_header08 = R.read_long_unsigned()  # always 73
+        #                     # armature_animation_bone_attribute_header09 = R.read_long_unsigned()  # always 0
+        #                     R.seek(36)
+        #                     armature_animation_bone_attribute_header10 = R.read_long_unsigned()  # name of bone
+        #                     armature_animation_bone_attribute_header11 = R.read_long_unsigned()
+        #                     armature_animation_bone_attribute_header12a = R.read_short_unsigned()
+        #                     # armature_animation_bone_attribute_header12b = R.read_short_unsigned()  # always 6
+        #                     # armature_animation_bone_attribute_header13 = R.read_long_unsigned()  # always 0
+        #                     # armature_animation_bone_attribute_header14 = R.read_long_unsigned()  # always 0
+        #                     # armature_animation_bone_attribute_header15 = R.read_long_unsigned()  # always 0
+        #                     R.seek(14)
+        #
+        #                     if nep_tools.debug:
+        #                         print("      AnimBoneAttrib %s:  %s   %s %s %s" % (
+        #                             current_animation_bone_attribute_number,
+        #                             hex(current_animation_bone_attribute_offset).rjust(10),
+        #                             model.strings[armature_animation_bone_attribute_header10].ljust(20),
+        #                             armature_animation_bone_attribute_header11,
+        #                             armature_animation_bone_attribute_header12a))
+        #
+        #                     armature_animation_bone_type2 = R.read_long_unsigned()
+        #                     if armature_animation_bone_type2 == 0x44:  # 68 # Dunno yet
+        #                         # header length  # always 0x20
+        #                         R.seek(4)  # skip header length
+        #                         armature_animation_bone_4byte_block_length = R.read_long_unsigned()  # Total Length of Block in 4-bytes
+        #                         # armature_animation_bone_type2_header03 = R.read_long_unsigned()  # always 0
+        #                         R.seek(4)
+        #                         armature_animation_bone_type2_header04a = R.read_short_unsigned()
+        #                         # armature_animation_bone_type2_header04b = R.read_short_unsigned()  # always 1
+        #                         R.seek(2)
+        #                         armature_animation_bone_4byte_entry_length = R.read_long_unsigned()  # Length of each entry in 4-bytes
+        #                         # armature_animation_bone_type2_header06 = R.read_long_unsigned()  # always 0
+        #                         # armature_animation_bone_type2_header07 = R.read_long_unsigned()  # always 0
+        #                         R.seek(8)
+        #
+        #                         armature_animation_frame_count = armature_animation_bone_4byte_block_length // armature_animation_bone_4byte_entry_length
+        #
+        #                         if nep_tools.debug:
+        #                             print("        AnimBoneAttrib2:  %s %s %s   Length: %s" % (
+        #                                 str(armature_animation_bone_4byte_block_length).rjust(3), armature_animation_bone_type2_header04a,
+        #                                 str(armature_animation_bone_4byte_entry_length).rjust(2), armature_animation_frame_count))
+        #
+        #                         if armature_animation_bone_type2_header04a == 0x0C:  # 12 # float array (probably vertices or matrices)
+        #                             for _ in range(armature_animation_frame_count):
+        #                                 armature_animation_keyframe_time_stamp = R.read_float()
+        #                                 armature_animation_keyframe_type1 = R.read_short_unsigned()
+        #                                 armature_animation_keyframe_type2 = R.read_short_unsigned()
+        #                                 armature_animation_keyframe_data: List[float] = []
+        #                                 for __ in range(armature_animation_bone_4byte_entry_length - 2):
+        #                                     armature_animation_keyframe_data.append(R.read_float())
+        #
+        #                                 mo_type.motion_data.append(import_to_blender.MotionFrame(armature_animation_keyframe_time_stamp, armature_animation_keyframe_data))
+        #
+        #                                 if nep_tools.debug:
+        #                                     print("        Keyframe %s  Type %s %s" % (armature_animation_keyframe_time_stamp, armature_animation_keyframe_type1, armature_animation_keyframe_type2))
+        #                                     print("          (%s)" % ", ".join([("%.4f" % _s_).rjust(7) for _s_ in armature_animation_keyframe_data]))
+        #                         elif armature_animation_bone_type2_header04a == 0x12:  # 18 # I have no idea what this is yet
+        #                             for _ in range(armature_animation_frame_count):
+        #                                 armature_animation_keyframe_time_stamp = R.read_half_float()
+        #                                 armature_animation_keyframe_type = R.read_short_unsigned()
+        #                                 armature_animation_keyframe_data = []
+        #                                 for __ in range(armature_animation_bone_4byte_entry_length - 2):
+        #                                     armature_animation_keyframe_data.append(R.read_half_float())
+        #
+        #                                 mo_type.motion_data.append(import_to_blender.MotionFrame(armature_animation_keyframe_time_stamp, armature_animation_keyframe_data))
+        #
+        #                                 if nep_tools.debug:
+        #                                     print("        Keyframe????? %s  Type %s" % (("%.3f" % armature_animation_keyframe_time_stamp).rjust(6), armature_animation_keyframe_type))
+        #                                     print("          (%s)" % ", ".join([str(_s_) for _s_ in armature_animation_keyframe_data]))
+        #                         else:
+        #                             if nep_tools.debug:
+        #                                 print("armature_animation_bone_type2_header04a == %s == %s   <not supported>" % (hex(armature_animation_bone_type2_header04a), armature_animation_bone_type2_header04a))
+        #                     else:
+        #                         if nep_tools.debug:
+        #                             print("        AnimBoneAttrib2: Type %s <not implemented>" % armature_animation_bone_type2)
+        #                 else:
+        #                     if nep_tools.debug:
+        #                         print("Armature Animation Type %s == %s <not implemented>" % (hex(current_animation_bone_attribute_offset).rjust(10), current_animation_bone_attribute_offset))
+        #                 mo_bone.motion_types.append(mo_type)
+        #         else:
+        #             if nep_tools.debug:
+        #                 print("    Armature Animation Attribute Type %i == Unknown @ %s" % (armature_animation_bone, hex(current_armature_animation_bone_offset)))
+        #         mo_.motion_bones.append(mo_bone)
+        #     model.motions.append(mo_)
         else:
             if nep_tools.debug:
                 print("\n  File Section Type %s == %s   @ %s  <not-implemented>" % (
@@ -1029,9 +1031,11 @@ def read_ism2(filepath: str, filename: str,
                     hex(current_file_section_offset)))
     R.close()
 
+    # Stored is a seperate file called face.anm (in the same directory)
     if option_parse_face_anm:
         model.face_anm = parse_face_anm(filepath + "face.anm")
 
+    # Stored as a list of files inside the "motion" directory
     if option_parse_motion:
         parse_motion(filepath + "motion\\")
 
@@ -1057,7 +1061,7 @@ def parse_face_anm(filepath: str) -> import_to_blender.FaceAnm:  # returns None 
     # Check Endian -- This is a count which will always have a low positive integer
     # Stream Reader Functions :: Some are created based on endian
     f.seek(4)
-    R: binary_file.LD_BinaryReader = binary_file.LD_BinaryReader(f, 0 < binary_file.struct_ULongL.unpack_from(f.read(4))[0] < 0x10000)
+    R: binary_file.LD_BinaryReader = binary_file.LD_BinaryReader(f, not (0 < binary_file.struct_ULongL.unpack_from(f.read(4))[0] < 0x10000))
 
     lines = []
     R.goto(0x0)
@@ -1178,10 +1182,17 @@ def parse_face_anm(filepath: str) -> import_to_blender.FaceAnm:  # returns None 
 
 if __name__ == "__main__":
     nep_tools.debug = True
+
+    # read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Neptunia Rebirth2\\data\\game\\model\\accessory\\050\\", "head.ism2")
+
+    # read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Neptunia Rebirth2\\data\\game\\model\\chara\\044", "002.ism2")
+
+    read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\CONTENTS\\GAME00001\\model\\chara\\052\\", "002.ism2")
+
     # read_file_ism2("C:\\Z\\3\\072\\", "002.ism2")
 
     # read_file_ism2("C:\\Z\\4\\818 - SignGirl\\", "002 - SignGirl.ism2")
-    read_ism2("C:\\Z\\4\\818 - SignGirl\\motion\\base\\", "m001.ism2")
+    # read_ism2("C:\\Z\\4\\818 - SignGirl\\motion\\base\\", "m001.ism2")
     # read_file_ism2("c:\\Z\\4\\303 - Purple Heart NEXT\\", "002.ism2")
 
     # parse_amature_animation("C:\\Z\\4\\303 - Purple Heart Next\\motion\\410\\")
