@@ -78,7 +78,7 @@ def read_half_float_big_endian(stream: BinaryIO):
 
 
 class LD_BinaryReader:
-    def __init__(self, stream: BinaryIO, little_endian: bool) -> None:
+    def __init__(self, stream: BinaryIO, big_endian: bool) -> None:
         super().__init__()
 
         self.stream = stream
@@ -87,18 +87,18 @@ class LD_BinaryReader:
         self.read_byte_as_float = lambda: read_byte_as_float(self.stream)
         self.read_string = lambda: read_string(self.stream)
         # TODO test if endian of 'float' ever changes
-        if little_endian:
-            self.read_long_unsigned = lambda: read_long_unsigned_little_endian(self.stream)
-            self.read_long_signed = lambda: read_long_signed_little_endian(self.stream)
-            self.read_short_unsigned = lambda: read_short_unsigned_little_endian(self.stream)
-            self.read_float = lambda: read_float_little_endian(self.stream)
-            self.read_half_float = lambda: read_half_float_little_endian(self.stream)
-        else:
+        if big_endian:
             self.read_long_unsigned = lambda: read_long_unsigned_big_endian(self.stream)
             self.read_long_signed = lambda: read_long_signed_big_endian(self.stream)
             self.read_short_unsigned = lambda: read_short_unsigned_big_endian(self.stream)
             self.read_float = lambda: read_float_big_endian(self.stream)
             self.read_half_float = lambda: read_half_float_big_endian(self.stream)
+        else:
+            self.read_long_unsigned = lambda: read_long_unsigned_little_endian(self.stream)
+            self.read_long_signed = lambda: read_long_signed_little_endian(self.stream)
+            self.read_short_unsigned = lambda: read_short_unsigned_little_endian(self.stream)
+            self.read_float = lambda: read_float_little_endian(self.stream)
+            self.read_half_float = lambda: read_half_float_little_endian(self.stream)
 
     def seek(self, amount: int):
         self.stream.seek(amount, 1)
