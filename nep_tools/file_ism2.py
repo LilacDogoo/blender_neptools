@@ -1187,7 +1187,9 @@ if __name__ == "__main__":
 
     # read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Neptunia Rebirth2\\data\\game\\model\\chara\\044", "002.ism2")
 
-    read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\CONTENTS\\GAME00001\\model\\chara\\052\\", "002.ism2")
+    # read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\CONTENTS\\GAME00001\\model\\chara\\052\\", "002.ism2")
+
+    read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\CONTENTS\\GAME00001\\model\\chara\\041\\", "002.ism2")
 
     # read_file_ism2("C:\\Z\\3\\072\\", "002.ism2")
 

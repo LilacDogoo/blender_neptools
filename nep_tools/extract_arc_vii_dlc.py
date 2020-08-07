@@ -132,31 +132,25 @@ def list_dlcs_as_text(folder: str = DEFAULT_VII_DLC_PATH) -> str:
     return text
 
 
-class ArcFileDescriptior:
+class ArcFileDescriptor:
     def __init__(self, path_type: int, entry_number: int, name: str, offset: int, size: int) -> None:
         super().__init__()
+        self.path_type_root: bool = False
+        self.path_type_folder: bool = False
+        self.path_type_file: bool = False
         if path_type == 0x02000000:
-            self.path_type_root: bool = False
             self.path_type_folder: bool = True
-            self.path_type_file: bool = False
         elif path_type == 0x03000000:
             self.path_type_root: bool = True
             self.path_type_folder: bool = True
-            self.path_type_file: bool = False
         elif path_type == 0x04000000:
-            self.path_type_root: bool = False
-            self.path_type_folder: bool = False
             self.path_type_file: bool = True
-        else:
-            self.path_type_root: bool = False
-            self.path_type_folder: bool = False
-            self.path_type_file: bool = False
         self.name: str = name
         self.path: str = ""
         self.entry_number: int = entry_number
         self.offset: int = offset
         self.size: int = size
-        self.parent: ArcFileDescriptior = None
+        self.parent: ArcFileDescriptor = None
 
     def get_path_type_name(self) -> str:
         if self.path_type_folder:
@@ -181,20 +175,21 @@ CREDIT: This section of code is based on a Quick BMS Script found here:  https:/
 
 def extract_arc_file(path: str):
     f = open(path, 'rb')
-    R = binary_file.LD_BinaryReader(f, False)
+    R = binary_file.LD_BinaryReader(f, True)
     if not f.read(4) == b'ARC\x02':
         print("INCORRECT FILE FORMAT  %s" % path)
+        return
 
     file_count = R.read_long_unsigned()  # File Count
     description_table_size = R.read_long_unsigned()  # Length of all the File Descriptions
-    description_table_entry_size = int(description_table_size / file_count)  # Length of all the File Descriptions
+    description_table_entry_size = int(description_table_size / file_count)  # Length of the File Descriptions
     file_name_list_size = R.read_long_unsigned()  # Full length
     offset_file_descriptions = f.tell()  # Location that File Descriptions begin
     offset_file_names = offset_file_descriptions + description_table_size  # Location that File Names begin
     offset_files = offset_file_names + file_name_list_size  # Location that File Data begins
 
     # Get file descriptors
-    file_descriptors: List[ArcFileDescriptior] = []
+    file_descriptors: List[ArcFileDescriptor] = []
     for i in range(file_count):
         R.goto(offset_file_descriptions + description_table_entry_size * i)
         a_path_type = R.read_long_unsigned()
@@ -205,7 +200,7 @@ def extract_arc_file(path: str):
         a_offset = R.read_long_unsigned()
         R.goto(a_name_offset)
         a_name = R.read_string()
-        d = ArcFileDescriptior(a_path_type, a_entry_number, a_name, a_offset, a_size)
+        d = ArcFileDescriptor(a_path_type, a_entry_number, a_name, a_offset, a_size)
         file_descriptors.append(d)
 
     # Set Parents to create a folder heirachy
@@ -236,4 +231,5 @@ def extract_arc_file(path: str):
 
 if __name__ == "__main__":
     nep_tools.debug = True
-    list_dlcs_as_text()
+    extract_arc_file("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\DLC\\DLC000000000006900000\\contents.arc")
+    # list_dlcs_as_text()
