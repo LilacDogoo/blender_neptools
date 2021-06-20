@@ -70,8 +70,7 @@ class BlenderOperator_ISM2_import(bpy.types.Operator):
                                              default=False)
 
     def invoke(self, context, event):
-        self.directory = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Superdimension Neptune VS Sega Hard Girls\\data\\GAME200000\\model\\dungeon\\map\\1600\\001"
-        # self.directory = "C:\\Program Files (x86)\\Steam\\steamapps\\common"
+        self.directory = "C:\\Program Files (x86)\\Steam\\steamapps\\common"
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
