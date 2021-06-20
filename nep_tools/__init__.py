@@ -4,12 +4,12 @@ Author: LilacDogoo
 
 import datetime
 
-lastUpdated = datetime.datetime(2020, 6, 16)
+lastUpdated = datetime.datetime(2021, 6, 20)
 bl_info = {
     "name": "NepTools",
     "author": "LilacDogoo",
-    "version": (1, 0, 0),
-    "blender": (2, 83, 0),
+    "version": (1, 2, 0),
+    "blender": (2, 93, 0),
     "category": "Import-Export",
     "location": "File > Import",
     "description": "Importer for ISM2 files from the Neptunia games."
@@ -17,6 +17,7 @@ bl_info = {
 
 # DEBUG MODE
 debug = False
+serious_error_notify = False
 
 if "bpy" in locals():
     import importlib
@@ -64,9 +65,8 @@ _classes = (
 
 def register():
     # Register all classes contained in this package so that Blender has access to them
-    from bpy.utils import register_class
     for cls in _classes:
-        register_class(cls)
+        bpy.utils.register_class(cls)
 
     # Add menu items
     bpy.types.TOPBAR_MT_editor_menus.append(TOPBAR_MT_NepTools.menu_draw)
@@ -80,4 +80,5 @@ def unregister():
 
     # Unregister classes
     for cls in _classes:
-        bpy.utils.unregister_class(cls)
+        if hasattr(bpy.types, cls.bl_idname):
+            bpy.utils.unregister_class(cls)

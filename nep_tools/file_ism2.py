@@ -25,6 +25,7 @@ About the face problem:
 """
 
 import os
+import traceback
 import math
 import time
 from typing import List, BinaryIO
@@ -35,8 +36,6 @@ import nep_tools
 from nep_tools import import_to_blender
 from nep_tools.utils import binary_file
 from nep_tools.utils.matrix4f import Matrix4f
-
-TEXTURE_PATH_DEFAULT = "texture\\001\\"
 
 
 class BlenderOperator_ISM2_import(bpy.types.Operator):
@@ -54,12 +53,6 @@ class BlenderOperator_ISM2_import(bpy.types.Operator):
     filter_glob: bpy.props.StringProperty(default="*.ism2", options={'HIDDEN'})
 
     # Custom Properties used by the file browser
-    p_load_textures_and_materials: bpy.props.BoolProperty(name="Load Textures and Materials",
-                                                          description="Attempts to load textures. You must be convert them to PNG first for this to work.",
-                                                          default=True)
-    p_texture_path: bpy.props.StringProperty(name="Texture Path",
-                                             description="The location to look for textures. Relative to the ism2 file.",
-                                             default=TEXTURE_PATH_DEFAULT)
     p_cull_back_facing: bpy.props.BoolProperty(name="Cull Backfaces",
                                                description="Generally enabled for video games models. Keep in mind, Models from these games are intended to 'back-face cull. Faces will exist in the exact same positions but have opposite normals.",
                                                default=True)
@@ -70,284 +63,311 @@ class BlenderOperator_ISM2_import(bpy.types.Operator):
                                                    description="They existed in the ISM2 file so I figured I could include them.",
                                                    default=False)
     # p_parse_motion: bpy.props.BoolProperty(name="Parse Armature Animation",
-    #                                                    description="For models that have animation data, an attempt will be made to parse it.\nCurrently not working",
-    #                                                    default=False)
+    #                                        description="For models that have animation data, an attempt will be made to parse it.\nCurrently not working",
+    #                                        default=False)
     p_parse_face_anm: bpy.props.BoolProperty(name="Parse \"face.anm\" File",
                                              description="For models that have face anm file, an attempt will be made to parse that file.\nNot too useful yet, but will provide a dump of information in a Blender text file.",
                                              default=False)
 
     def invoke(self, context, event):
-        self.directory = "C:\\Program Files (x86)\\Steam\\steamapps\\common"
+        self.directory = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Superdimension Neptune VS Sega Hard Girls\\data\\GAME200000\\model\\dungeon\\map\\1600\\001"
+        # self.directory = "C:\\Program Files (x86)\\Steam\\steamapps\\common"
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
+        nep_tools.serious_error_notify = False
         time_start = time.time()  # Operation Timer
-        # Iterate through all slected files
+        # Create Pre-Models from each selected file
+        models: List[import_to_blender.PreBlender_Model] = []
         for file in self.files:
             # Extract ISM2 file into Model Object
-            model: import_to_blender.PreBlender_Model = read_ism2(filepath=self.directory, filename=file.name,
-                                                                  texture_path=self.p_texture_path,
-                                                                  option_load_textures_and_materials=self.p_load_textures_and_materials,
-                                                                  option_parse_bounding_boxes=self.p_parse_bounding_boxes,
-                                                                  option_parse_face_anm=self.p_parse_face_anm,
-                                                                  option_parse_motion=False)  # self.p_parse_motion,  # TODO
-            import_to_blender.to_blender(model,
+            model: import_to_blender.PreBlender_Model = None
+            try:
+                model = read_ism2(filedirectory=self.directory, filename=file.name,
+                                  option_parse_bounding_boxes=self.p_parse_bounding_boxes,
+                                  option_parse_face_anm=self.p_parse_face_anm,
+                                  option_parse_motion=False)  # self.p_parse_motion,  # TODO
+            except:
+                print("ERROR: Failed to read ► %s" % file.name)
+                traceback.print_exc()
+
+            if model is not None:  # IF model succeeded THEN add to model list
+                models.append(model)
+
+        # Use Pre-Models to import to blender
+        if len(models):
+            import_to_blender.to_blender(models,
                                          option_cull_back_facing=self.p_cull_back_facing,
                                          option_merge_vertices=False,  # self.p_merge_vertices,  # TODO
                                          option_import_location=bpy.context.scene.cursor.location)
 
         time_end = time.time()  # Operation Timer
-        print("    Completed %s in %.4f seconds" % (model.getName(), time_end - time_start))
+        print("    Completed %s in %.4f seconds" % (models[0].getName() if len(models) > 0 else "%i models" % len(models), time_end - time_start))
+
+        if nep_tools.serious_error_notify:
+            def draw(self, context):
+                self.layout.label(text="Check Console for details.\n \'Window > Toggle System Console\'")
+
+            bpy.context.window_manager.popup_menu(draw, title="Serious Error(s)", icon='ERROR')
+
         return {'FINISHED'}
 
 
-def read_ism2(filepath: str, filename: str,
-              texture_path: str = TEXTURE_PATH_DEFAULT,
-              option_load_textures_and_materials: bool = True,
+def read_ism2(filedirectory: str, filename: str,
               option_parse_bounding_boxes: bool = False,
               option_parse_face_anm: bool = False,
               option_parse_motion: bool = False,
               transform_to_blender_space: Matrix4f = Matrix4f.create_rotation_x(math.pi * .5)) -> nep_tools.import_to_blender.PreBlender_Model:
-    if not filepath.endswith(os.path.sep):
-        filepath = filepath + os.path.sep
-    while texture_path.startswith("\\") or texture_path.startswith("/") or texture_path.startswith(" "):
-        texture_path = texture_path[1:]
-    while texture_path.endswith("\\") or texture_path.endswith("/") or texture_path.endswith(" "):
-        texture_path = texture_path[0:-1]
-    texture_path = texture_path + os.path.sep
-    if texture_path == os.path.sep:
-        texture_path = ""
+    # Blender adds a '\' to the end of the filepath. This is annoying since upon the first use of 'os.path.dirname()' does not work as intended. Only the last '\' gets removed.
+    # To counter this effect I will ensure that there is no '\' at the end of the file
+    while filedirectory[-1] == '\\':
+        filedirectory = filedirectory[0:-1]
 
     # Begin Parsing File
-    f: BinaryIO = open(filepath + filename, 'rb')
+    f: BinaryIO = open(os.path.join(filedirectory, filename), 'rb')
 
     # Reads the first 4 bytes of the files and checks for the signature
     if f.read(4).decode() != "ISM2":
-        print("ERROR: File signature did not match \"ISM2\"" + filepath)
+        print("ERROR: File signature did not match \"ISM2\"" + filedirectory)
         f.close()
         return None
 
     # Check Endian -- This is the section count, which will obviously always have a low positive integer
-    # Stream Reader Functions :: Some are created based on endian
+    # Stream Reader Functions :: Some reader functions are based on endian
     f.seek(0x14)
     R: binary_file.LD_BinaryReader = binary_file.LD_BinaryReader(f, not (0 < binary_file.struct_ULongL.unpack_from(f.read(4))[0] < 0x10000))
 
-    model = nep_tools.import_to_blender.PreBlender_Model()
-    model.name = filename
+    model = nep_tools.import_to_blender.PreBlender_Model(filename)  # default name in case the real name was not found. (Usually found in one of the Armature Bones)
+
+    # Map all material Locations - This is NOT part of the ISM2 file
+    texture_directory_characters: str = os.path.join(filedirectory, "texture")
+    texture_directory_maps_RB3: str = os.path.join(os.path.dirname(filedirectory), "texture")
+    texture_directory_maps_VII: str = os.path.join(os.path.dirname(os.path.dirname(filedirectory)), "texture")
+
+    if os.path.exists(texture_directory_characters):  # This should be true for Characters & Accessories
+        subpaths: List[str] = next(os.walk(texture_directory_characters), (None, [], None))[1]
+        if len(subpaths) == 0: print("Character textures have not been extracted at this location:\n    %s" % texture_directory_characters)
+        for sp in subpaths:  # Characters always have variation textures in subdirectories
+            model.texture_directories.append(import_to_blender.TextureDirectory(sp, os.path.join(texture_directory_characters, sp)))
+    elif os.path.exists(texture_directory_maps_VII):  # This should be true for Maps in VII
+        model.texture_directories.append(import_to_blender.TextureDirectory(None, texture_directory_maps_VII))
+    elif os.path.exists(texture_directory_maps_RB3):  # This should be true for Maps in ReBirth 3
+        model.texture_directories.append(import_to_blender.TextureDirectory(None, texture_directory_maps_RB3))
+
+    # Helper Variables
     bboxCount = 0
     degTOrad = math.pi / 180
 
+    # Begin Decoding
     R.goto(0x04)
     versionA = R.read_byte_unsigned()
     versionB = R.read_byte_unsigned()
     versionC = R.read_byte_unsigned()
     versionD = R.read_byte_unsigned()
-    # header2 = Never Used
-    # header3 = Never Used
     R.goto(0x10)  # Skip over unused variables listed above
     file_length = R.read_long_unsigned()
     file_section_count = R.read_long_unsigned()
-    # header6 = Never Used
-    # header7 = Never Used
 
-    print("ISM2 v%s.%s.%s.%s  Size: %s   %s" % (versionA, versionB, versionC, versionD, file_length, filepath + filename))
+    print("ISM2 v%s.%s.%s.%s  Size: %s  < %s >" % (versionA, versionB, versionC, versionD, str(file_length).rjust(8), os.path.join(filedirectory, filename)))
 
-    R.goto(0x20)  # Skip over unused variables listed above
+    R.goto(0x20)  # Where the File Section pointers are
     # Read File Section Pointers
-    file_section_type_array = []
-    file_section_offset_array = []
-    for current_file_section in range(file_section_count):
-        file_section_type_array.append(R.read_long_unsigned())
-        file_section_offset_array.append(R.read_long_unsigned())
+    file_section_codes = []
+    file_section_offsets = []
+    for _ in range(file_section_count):
+        file_section_codes.append(R.read_long_unsigned())
+        file_section_offsets.append(R.read_long_unsigned())
+    for file_section_index in range(file_section_count):
+        file_section_code = file_section_codes[file_section_index]
+        file_section_offset = file_section_offsets[file_section_index]
 
-    for current_file_section in range(file_section_count):
-        current_file_section_offset = file_section_offset_array[current_file_section]
-        current_file_section_type = file_section_type_array[current_file_section]
+        # File Section Types
+        # ------------------
+        # ( ) = Not Implemented  - No work has been done
+        # (T) = Text output only - Data is exported to a human-readable file
+        # (E) = Error Prone      - Functions but buggy
+        # (G) = Good             - Functions without guarantee
+        # (C) = Complete         - Fully Functional and believed to be bug free
+        # ------------------
+        # 0x03 003 (G) Armature Data Block (Surfaces are in here for some reason)
+        # 0x0B 011 (G) Object-Mesh
+        # 0x21 033 (C) Strings
+        # 0x2E 046 (C) Textures
+        # 0x32 050 ( ) <unknown>
+        # 0x34 052 ( ) Armature Animations
+        # 0x61 097 (G) Materials
+        # 0x62 098 (G) FX Shader Nodes
+        # 0x82 130 ( ) <unknown>
 
-        R.goto(current_file_section_offset)
-        if current_file_section_type == 0x21:  # Strings
-            # Strings Header 0: File Section Type
-            # Strings Header 1: Header Length
-            R.seek(8)
-            # Strings Header 2: String Count
+        R.goto(file_section_offset)
+        if file_section_code == 0x21:  # Strings
+            R.seek(0x08)
             string_count = R.read_long_unsigned()
-
-            if nep_tools.debug:
-                print("\n  File Section Type %s == %s: String Array Header  @ %s   Count %i" %
-                      (hex(current_file_section_type), current_file_section_type, hex(current_file_section_offset), string_count))
-
-            string_offset_array = []
-            for current_string in range(string_count):
-                string_offset_array.append(R.read_long_unsigned())
-            for current_string in range(string_count):
-                R.goto(string_offset_array[current_string])
+            offset_array = []
+            for _ in range(string_count):
+                offset_array.append(R.read_long_unsigned())
+            for offset in offset_array:
+                R.goto(offset)
                 model.strings.append(R.read_string())
 
+        elif file_section_code == 0x2E:  # 46 # Textures
+            R.seek(8)  # Skip over Section Type & Header Length
+            textures_count = R.read_long_unsigned()  # Textures Header 2: Number of Textures in list
+
             if nep_tools.debug:
-                for current_string in range(string_count):
-                    print("    String: ID = %s = %s    @ %s -- \"%s\"" %
-                          (str(current_string).rjust(3), hex(current_string).rjust(5),
-                           hex(string_offset_array[current_string]).rjust(5),
-                           model.strings[current_string]))
+                print("\n  File Section Type %s == %s  Texture List @ %s" % (hex(file_section_code), file_section_code, hex(file_section_offset)))
 
-        elif current_file_section_type == 0x2E:  # 46 # Textures
-            if option_load_textures_and_materials:
-                if nep_tools.debug:
-                    print("Textures Block will not be used.")
-                # This is section is completely unused. Trying to use this has only caused me problems.
-                # The names of these textures are inconsistant making them unreliable.
-                # Instead; the texture names that are found in the materials is always correct.
-                # Maybe in the future this can be used to locate files within the '.cl2', '.dds', and '.tid' files.
+            texture_offsets = []
+            for ___ in range(textures_count):
+                texture_offsets.append(R.read_long_unsigned())
+            for texture_offset in texture_offsets:
+                R.goto(texture_offset)
+                R.seek(0x04)
+                texture_name = model.strings[R.read_long_unsigned()]
+                R.seek(0x08)
+                texture_filename = model.strings[R.read_long_unsigned()]
+                i = texture_filename.rfind('.')  # Trim file extension if it exists
+                if i > 0: texture_filename = texture_filename[0:i]
+                model.textures[texture_name] = texture_filename
 
-                # Textures Header 0: File Section Type
-                #   Unused because it always equals file_section_type. It is duplicate data.
-                # textures_file_section_type = R.read_long_unsigned()
+        elif file_section_code == 0x62:  # 98 # FX Shader Nodes
+            pass  # Not Implemented - No usefull information in this section
 
-                # Textures Header 1: Header Length
-                # textures_header_length = R.read_long_unsigned()
+        elif file_section_code == 0x61:  # 97 # Materials
+            R.seek(0x08)  # Skip over unused header variables
+            materials_count = R.read_long_unsigned()  # Materials Header 2: Number of Materials in list
+            if nep_tools.debug:
+                print("\n  File Section Type %s == %s  Material List @ %s" % (hex(file_section_code), file_section_code, hex(file_section_offset)))
 
-                R.seek(8)  # Skip over unused variables listed above
-                # Textures Header 2: Number of Textures in list
-                textures_count = R.read_long_unsigned()
+            material_offsets = []
+            for ___ in range(materials_count):
+                material_offsets.append(R.read_long_unsigned())
+            for material_index, material_offset in enumerate(material_offsets):
+                R.goto(material_offset)
 
-                if nep_tools.debug:
-                    print("\n  File Section Type %s == %s  Texture List @ %s" % (hex(current_file_section_type), current_file_section_type, hex(current_file_section_offset)))
+                # Type 0x0D - # 13 # Material
+                R.seek(0x0C)
+                material = import_to_blender.Material(model.strings[R.read_long_unsigned()])  # Read the material_name_ID
+                model.materials.append(material)
+                R.seek(0x0C)
+                R.goto(R.read_long_unsigned())
 
-                textures_offset_array = []
-                for current_texture in range(textures_count):
-                    textures_offset_array.append(R.read_long_unsigned())
-                for current_texture in range(textures_count):
-                    R.goto(textures_offset_array[current_texture])
-                    # Texture Blocks are always 32 bytes long
-                    # texture_type = R.read_long_unsigned()  # this is always 0x2D == 45
-                    R.seek(4)
-                    texture_name_string_id = R.read_long_unsigned()
-                    texture_name2_string_id = R.read_long_unsigned()
-                    texture_full_file_path_string_id = R.read_long_unsigned()
-                    texture_filename_string_id = R.read_long_unsigned()
-
-                    # TODO  Auto-Extract DDS and TID >> convert to PNG
-                    # TODO  IF a 'switch' node comes out for Blender Shaders THEN use that to load all variations of textures
-                    model.textures.append(import_to_blender.Texture(
-                        model.strings[texture_name_string_id],
-                        model.strings[texture_name2_string_id],
-                        model.strings[texture_full_file_path_string_id],
-                        model.strings[texture_filename_string_id]))
-
-                    if nep_tools.debug:
-                        print(model.textures[current_texture])
-
-        elif current_file_section_type == 0x62:  # 98 # FX Shader Nodes
-            if option_load_textures_and_materials:
-                R.seek(8)
-                fx_shader_node_count = R.read_long_unsigned()
-                if nep_tools.debug:
-                    print("\n  File Section Type %s == %s   @ %s FX Shader Nodes  %s  <incomplete>" %
-                          (hex(file_section_type_array[current_file_section]), file_section_type_array[current_file_section],
-                           hex(current_file_section_offset), fx_shader_node_count))
-
-                fx_shader_node_offset_array = []
-                for current_fx_shader_node in range(fx_shader_node_count):
-                    fx_shader_node_offset_array.append(R.read_long_unsigned())
-                for current_fx_shader_node in range(fx_shader_node_count):
-                    R.goto(fx_shader_node_offset_array[current_fx_shader_node] + 0x08)
-                    fx_shader_property_count = R.read_long_unsigned()
-                    fx_shader_node_name = model.strings[R.read_long_unsigned()]
-
-                    if nep_tools.debug:
-                        print("    FX Shader Node @%s: %s" % (hex(fx_shader_node_offset_array[current_fx_shader_node]).rjust(8), fx_shader_node_name))
-
-        elif current_file_section_type == 0x61:  # 97 # Materials
-            if option_load_textures_and_materials:
-                # Materials Header 0: File Section Type
-                #   Unused because it always equals file_section_type. It is duplicate data.
-                # materials_file_section_type = R.read_long_unsigned()
-
-                # Materials Header 1: Header Length
-                # materials_header_length = R.read_long_unsigned()
-
-                R.seek(8)  # Skip over unused variables listed above
-                # Materials Header 2: Number of Materials in list
-                materials_count = R.read_long_unsigned()
+                # Type 0x6C = 108 - This is where the split to multiple textures happen (diffuse, normal, ect...)
+                R.seek(0x08)
+                texture_count = R.read_long_unsigned()
 
                 if nep_tools.debug:
-                    print("\n  File Section Type %s == %s  Material List @ %s" % (hex(current_file_section_type), current_file_section_type, hex(current_file_section_offset)))
+                    print("    Material %s: @ %s   [[ %s ]]" % (
+                        material_index, hex(material_offset), material))
 
-                materials_offset_array = []
-                for current_material_number in range(materials_count):
-                    materials_offset_array.append(R.read_long_unsigned())
-                for current_material_number in range(materials_count):
-
-                    # TODO - This looks like it might be inputs for a shader.
-                    # I'm going to skip only to what I need for now.
-                    # All I need is the Material name and the Diffuse Texture
-                    R.goto(materials_offset_array[current_material_number])
-
-                    # Type 0x0D
-                    addr = f.tell()
-                    R.seek(0x08)
-                    sub_material_count = R.read_long_unsigned()
-                    current_material_name_string_id = R.read_long_unsigned()
-                    R.seek(0x0C)
-                    R.goto(R.read_long_unsigned())
-
-                    # Type 0x6C = 108
-                    R.seek(0x0C)
-                    R.goto(R.read_long_unsigned())
+                texture_offsets = []
+                for ____ in range(texture_count):
+                    texture_offsets.append(R.read_long_unsigned())
+                for texture_offset in texture_offsets:
+                    R.goto(texture_offset)
 
                     # Type 0x6A = 106
                     R.seek(0x14)
                     R.goto(R.read_long_unsigned())
 
-                    # Type 0x6B = 107
+                    # ** 0X6B ** Description
+                    # 0x6B Header
+                    # Offset      Length      Description
+                    # 0x00        0x04        BlockID  = 0x6A
+                    # 0x04        0x04        BlockLen = 0x18
+                    # 0x08        0x04        EntryCount (Always a list of pointers)
+                    # 0x0C        0x02        EntryType ** View Types Below
+                    # 0x0E        0x02         <Unknown>  (I've only seen values 0x00 and 0x19 so far)
+                    # 0x10        0x04        EntryLength (Examples: {IF entries are integers THEN 1 , IF entries are vectors THEN 3})
+                    # 0x14        0x04        Pointer to 0x6A Block. Only EntryType[0x0E] contains these.
+                    # 0x6B BODY
+                    # The body is always a list of pointers.
+                    # The '1st 0x6B' usually has an entry type of '0x02' OR '0x06'. These contain pointers that point to more '0x6B's.
+                    #
+                    # 0x6B > EntryType Values (The pointers will point to these)
+                    # 0x06    Pointers to more '0x6B' blocks as listed below - This is a 'Texture(Surface)'. *** TARGET ***
+                    #   0x15    'file_name' - 99% of the time. Sometimes it says things like 'rock_c1' when it should say 'rock_c'. *** TARGET ***
+                    #   0x18    'pixel_format' - of DDS file. (I already have to converted to PNG)
+                    # 0x02    Pointers to more '0x6B' blocks as listed below - This is a 'Texture(Surface) Sampler'.
+                    #   0x0E    The name of the '0x6A' block that contains the texture(surface) for this sampler. (This also contains a pointer to the same '0x6A' block in it's header.)
+                    #   0x0F    The name of referenced 'Texture(Surface) Sampler' ???
+                    #   0x10    The name of referenced 'Texture(Surface) Sampler' ???
+                    #   0x12    The file_name of an 'ism2' file ???
+                    #   0x13    The file_name of an 'ism2' file ???
+                    #   0x14    The file_name of an 'ism2' file ???
+
+                    # Type 0x6B = 107 - We can determin here if this will be a texture(0x06) or surface(0x02)
+                    R.seek(0x0C)
+                    # IF the read value is not 0x06 THEN this is not a texture
+                    if 0x06 != R.read_short_unsigned():
+                        continue
+                    R.seek(0x0A)  # From the '1st 0x6B'; the first pointer always points to the '2nd 0x6B' which has the 'file_name'.
+                    R.goto(R.read_long_unsigned())  # read the pointer to the second 0x6B block and goes to it
+
+                    # Type 0x6B = 107 - This '2nd 0x6B' always contains 1 pointer that points to the 'string_index' which contains the 'file_name'.
                     R.seek(0x18)
-                    R.goto(R.read_long_unsigned())
+                    R.goto(R.read_long_unsigned())  # read the '2nd 0x6B's pointer and go to it.
 
-                    # Type 0x6B = 107
-                    R.seek(0x18)
-                    R.goto(R.read_long_unsigned())
+                    # TODO Define in Blender how to handle missing textures.
+                    #    • Create a texture node with the corrext filepath even tho it doesn't exist so that when the user does create the PNG Blender will find it.
+                    # TODO  Auto-Extract DDS and TID >> convert to PNG
 
-                    # Type Undefined
-                    # Get the diffuse_texture_string
-                    current_material_diffuse_texture = model.strings[R.read_long_unsigned()]
+                    texture_filename: str = model.strings[R.read_long_unsigned()]
+                    texture_filename_mapped: str = model.textures[texture_filename] if texture_filename in model.textures else None
 
-                    model.materials.append(import_to_blender.Material(model.strings[current_material_name_string_id], current_material_diffuse_texture, filepath + texture_path + current_material_diffuse_texture + ".png"))
+                    if len(model.texture_directories) > 0:  # Test against first directory
+                        texture_directory = model.texture_directories[0]
+                        # The preffered texture is the one we use the Texture dict where key-value pairs are (name, filename).
+                        # IF preffered texture failed THEN try non-mapped texture
+                        if texture_filename_mapped is not None and os.path.exists(os.path.join(texture_directory.path, "%s.png" % texture_filename_mapped)):
+                            texture_filename = texture_filename_mapped  # Preffered texture found
+                        else:
+                            if not os.path.exists(os.path.join(texture_directory.path, "%s.png" % texture_filename)):
+                                # Neither PNG was found
+                                if os.path.exists(os.path.join(texture_directory.path, "%s.tid" % texture_filename)) \
+                                        or os.path.exists(os.path.join(texture_directory.path, "%s.tid" % texture_filename_mapped)):
+                                    print("  Texture['%s']: User did not extract PNG from TID file in directory < %s >" % (texture_filename, texture_directory.path))
+                                else:
+                                    print("  Texture['%s']: Neither PNG or TID file was found in directory < %s >" % (texture_filename, texture_directory.path))
 
-                    if nep_tools.debug:
-                        print("    Material %s: @ %s   name=%s   diffuse_texture=%s" % (
-                            current_material_number, hex(materials_offset_array[current_material_number]), model.materials[current_material_number].name, model.materials[current_material_number].texture_name))
-                # TODO do I need to specify a default texture ??
+                    # Assign the texture_filename to the correct texture map
+                    _index = texture_filename.rfind("_", -4)
+                    texture_code: str = texture_filename[_index + 1].lower() if _index != -1 else "_"
+                    if texture_code == "c":
+                        material.texture_diffuse_filename = texture_filename
+                    elif texture_code == "s":
+                        material.texture_specular_filename = texture_filename
+                    elif texture_code == "i":
+                        material.texture_emission_filename = texture_filename
+                    elif texture_code == "n":
+                        material.texture_normal_filename = texture_filename
+                    elif texture_code == "m":
+                        material.texture_cyangreen_filename = texture_filename
+                    else:
+                        print("  ERROR: Texture type unknown: < %s >" % texture_filename)
 
-        elif current_file_section_type == 0x03:  # Armature Data Block
-            # Armature Header 0: File Section Type
-            #   Unused because the it always equals file_section_type. It is duplicate data.
+        elif file_section_code == 0x03:  # Armature
             R.seek(4)  # Skip over unused variables listed above
-
             # Armature Header 1: Armature Header Length
             armature_header_length = R.read_long_unsigned()
-
             # Armature Header 2: Bone Count
             model.bones = import_to_blender.Bones(R.read_long_unsigned())
 
-            # armature_name1_string_id = R.read_long_unsigned()  # Never Used
-            # armature_name2_string_id2 = R.read_long_unsigned()  # Never Used
-
             if nep_tools.debug:
                 print("\n  File Section Type %s == %s: Armature  @ %s" %
-                      (hex(current_file_section_type), current_file_section_type, hex(current_file_section_offset)))
+                      (hex(file_section_code), file_section_code, hex(file_section_offset)))
 
-            R.goto(current_file_section_offset + armature_header_length)
-            # Read the Bone pointers
-            bone_header_offset_array = []
-            for current_bone_index in range(model.bones.count):
-                bone_header_offset_array.append(R.read_long_unsigned())
+            R.goto(file_section_offset + armature_header_length)
 
             # Read each Bone
-            for current_bone_index in range(model.bones.count):  # BONE DATA BLOCK
-                current_bone_offset = bone_header_offset_array[current_bone_index]
+            bone_header_offset_array = []
+            for ___ in range(len(model.bones)):
+                bone_header_offset_array.append(R.read_long_unsigned())
+            for current_bone_offset in bone_header_offset_array:  # BONE DATA BLOCK
                 R.goto(current_bone_offset)
-                # Bone Type 0:
+
+                # Bone Header 0: Type
                 #   I've only seen values 4 & 5 at this location so far - I don't know what they mean though
                 #   Possibly, Type 0x04 == non-deforming && Type 0x05 == deforming
                 #   Possibly, Type 0x04 never has a parent bone
@@ -388,43 +408,38 @@ def read_ism2(filepath: str, filename: str,
                 if bone_parent_offset != 0x0:
                     R.goto(bone_parent_offset + 0x34)
                     current_bone.parentid = R.read_long_unsigned()
-
                 R.goto(current_bone_offset + bone_header_length)
-                # Read Bone Attribute Pointers
-                bone_attribute_offset_array = []
-                for current_bone_attribute in range(bone_attribute_count):
-                    bone_attribute_offset_array.append(R.read_long_unsigned())
 
                 if nep_tools.debug:
                     _parent = model.bones[current_bone.parentid].name if current_bone.parentid >= 0 else "NONE"
-                    print("    BONE %s: ID=%s  Type: %s  @ %s   ParentBone: %s   name= %s" % (
-                        current_bone_index, str(current_bone.bone_id).rjust(3), bone_type, hex(current_bone_offset),
+                    print("    BONE @ %s: ID=%s  Type: %s  @ %s   ParentBone: %s   name= %s" % (
+                        hex(current_bone_offset), str(current_bone.bone_id).rjust(3), bone_type, hex(current_bone_offset),
                         str(_parent).ljust(15), current_bone.name))
 
-                # Read each Bone Attribute
-                for current_bone_attribute in range(bone_attribute_count):
-                    R.goto(bone_attribute_offset_array[current_bone_attribute])
+                # Read Bone Attributes
+                bone_attribute_offset_array = []
+                for ____ in range(bone_attribute_count):
+                    bone_attribute_offset_array.append(R.read_long_unsigned())
+                for current_bone_attribute_offset in bone_attribute_offset_array:
+                    R.goto(current_bone_attribute_offset)
 
                     bone_attribute_type = R.read_long_unsigned()
                     if bone_attribute_type == 0x5B:  # Type 91 # Bone Attibute: Transforms (Transforms are relative to parent)
                         bone_transform_length = R.read_long_unsigned()
                         bone_transform_count = R.read_long_unsigned()
 
-                        if nep_tools.debug: print("      Bone Attribute Type 0x5B == 91 <Transforms>: @ %s" % hex(bone_attribute_offset_array[current_bone_attribute]).rjust(6))
+                        if nep_tools.debug: print("      Bone Attribute Type 0x5B == 91 <Transforms>: @ %s" % hex(current_bone_attribute_offset).rjust(6))
 
-                        bone_transform_offset_array = []
-                        for current_bone_transform in range(bone_transform_count):
-                            bone_transform_offset_array.append(R.read_long_unsigned())
-
+                        # TODO Figure out the Matrix stuff so that is can be used with animations
                         m_trans = (0, 0, 0)
                         m_scale = (1, 1, 1)
                         m_rot_euler_a = [0, 0, 0]
                         m_rot_euler_b = [0, 0, 0]
 
-                        # TODO Figure out the Matrix stuff so that is can be used with animations
-
-                        for current_transform in range(bone_transform_count):
-                            current_transform_offset = bone_transform_offset_array[current_transform]
+                        bone_transform_offset_array = []
+                        for ______ in range(bone_transform_count):
+                            bone_transform_offset_array.append(R.read_long_unsigned())
+                        for current_transform_index, current_transform_offset in enumerate(bone_transform_offset_array):
                             R.goto(current_transform_offset)
                             bone_transform_type = R.read_long_unsigned()
                             # bone_transform_header1 = R.read_long_unsigned()  # I don't know what this is but it is always zero
@@ -434,7 +449,7 @@ def read_ism2(filepath: str, filename: str,
                                 m41, m42, m43 = R.read_float(), R.read_float(), R.read_float()
                                 m_trans = (m41, m42, m43)
                                 if nep_tools.debug: print("        Bone Tansform %s: @ %s == %s  Type=%s == %s          Translate(%.4f, %.4f, %.4f)" % (
-                                    current_transform, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m41, m42, m43))
+                                    current_transform_index, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m41, m42, m43))
                             # I have not needed the scale section yet. So until I need it, I'm not going to bother processing it
                             # elif bone_transform_type == 0x15:  # 21 # Scale
                             #     scalex, scaley, scalez = R.read_float(), R.read_float(), R.read_float()
@@ -446,19 +461,19 @@ def read_ism2(filepath: str, filename: str,
                                 # f.seek(12, 1)  # Skips the Vector
                                 m_rot_euler_b[0] = degTOrad * m18  # R.read_float()
                                 if nep_tools.debug: print("        Bone Tansform %s: @ %s == %s  Type=%s == %s          Matrix.X(%.4f, %.4f, %.4f, %.4f)" % (
-                                    current_transform, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m15, m16, m17, m18))
+                                    current_transform_index, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m15, m16, m17, m18))
                             elif bone_transform_type == 0x5E:  # 94 # Matrix Y
                                 m25, m26, m27, m28 = R.read_float(), R.read_float(), R.read_float(), R.read_float()
                                 # f.seek(12, 1)  # Skips the Vector
                                 m_rot_euler_b[1] = degTOrad * m28  # R.read_float()
                                 if nep_tools.debug: print("        Bone Tansform %s: @ %s == %s  Type=%s == %s          Matrix.Y(%.4f, %.4f, %.4f, %.4f)" % (
-                                    current_transform, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m25, m26, m27, m28))
+                                    current_transform_index, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m25, m26, m27, m28))
                             elif bone_transform_type == 0x5F:  # 95 # Matrix Z
                                 m35, m36, m37, m38 = R.read_float(), R.read_float(), R.read_float(), R.read_float()
                                 # f.seek(12, 1)  # Skips the Vector
                                 m_rot_euler_b[2] = degTOrad * m38  # R.read_float()
                                 if nep_tools.debug: print("        Bone Tansform %s: @ %s == %s  Type=%s == %s          Matrix.Z(%.4f, %.4f, %.4f,  %.4f)" % (
-                                    current_transform, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m35, m36, m37, m38))
+                                    current_transform_index, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m35, m36, m37, m38))
 
                             # These "Joint Orient" blocks contains 4 floats.
                             # The first three represent a Vector
@@ -469,19 +484,19 @@ def read_ism2(filepath: str, filename: str,
                                 # f.seek(12, 1)  # Skips the Vector
                                 m_rot_euler_a[0] = degTOrad * m14  # R.read_float()
                                 if nep_tools.debug: print("        Bone Tansform %s: @ %s == %s  Type=%s == %s          Joint.X(%.4f, %.4f, %.4f,  %.4f)" % (
-                                    current_transform, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m11, m12, m13, m14))
+                                    current_transform_index, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m11, m12, m13, m14))
                             elif bone_transform_type == 0x68:  # 104 # Joint Orient Y
                                 m21, m22, m23, m24 = R.read_float(), R.read_float(), R.read_float(), R.read_float()
                                 # f.seek(12, 1)  # Skips the Vector
                                 m_rot_euler_a[1] = degTOrad * m24  # R.read_float()
                                 if nep_tools.debug: print("        Bone Tansform %s: @ %s == %s  Type=%s == %s          Joint.Y(%.4f, %.4f, %.4f,  %.4f)" % (
-                                    current_transform, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m21, m22, m23, m24))
+                                    current_transform_index, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m21, m22, m23, m24))
                             elif bone_transform_type == 0x69:  # 105 # Joint Orient Z
                                 m31, m32, m33, m34 = R.read_float(), R.read_float(), R.read_float(), R.read_float()
                                 # f.seek(12, 1)  # Skips the Vector
                                 m_rot_euler_a[2] = degTOrad * m34  # R.read_float()
                                 if nep_tools.debug: print("        Bone Tansform %s: @ %s == %s  Type=%s == %s          Joint.Z(%.4f, %.4f, %.4f,  %.4f)" % (
-                                    current_transform, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m31, m32, m33, m34))
+                                    current_transform_index, hex(current_transform_offset).rjust(6), str(current_transform_offset).ljust(6), hex(bone_transform_type), bone_transform_type, m31, m32, m33, m34))
 
                             #
                             # This is commented since no assigned variables ever get used after
@@ -574,76 +589,56 @@ def read_ism2(filepath: str, filename: str,
                         # IF parent exists THEN multiply against parent matrix
                         current_bone.transform = model.bones[current_bone.parentid].transform.multiply_right(t) if current_bone.parentid >= 0 else transform_to_blender_space.multiply_right(t)
 
-                    elif bone_attribute_type == 0x4C:  # Type 76 # Bone Attribute: Surfaces
+                    elif bone_attribute_type == 0x4C or bone_attribute_type == 0x4D:  # Type 76 or 77 # Bone Attribute: Surfaces  ( WHY are surfaces here? It makes no sense to me )
                         # This is the only bone that contains surfaces, it also has the name of the model
                         model.name = current_bone.name
-
-                        # bone_attribute_surfaces_header_length = R.read_long_unsigned()
                         R.seek(4)
                         bone_attribute_surfaces_count = R.read_long_unsigned()
-                        # bone_attribute_surfaces_string_id = R.read_long_unsigned()
-                        # bone_attribute_surfaces_header3 = R.read_long_unsigned()
-                        # bone_attribute_surfaces_header4 = R.read_long_unsigned()
-                        R.seek(12)
-
-                        if nep_tools.debug:
-                            print("      Bone Attribute Type 0x4C == 76 <Surfaces>: @ %s" % hex(bone_attribute_offset_array[current_bone_attribute]).rjust(6))
-
-                        bone_attribute_surface_offset_array = []
-                        for current_surface in range(bone_attribute_surfaces_count):
-                            bone_attribute_surface_offset_array.append(R.read_long_unsigned())
+                        R.seek(12) if bone_attribute_type == 0x4C else R.seek(8)
+                        if nep_tools.debug: print("      Bone Attribute Type 0x4C == 76 <Surfaces>: @ %s" % hex(current_bone_attribute_offset).rjust(6))
 
                         # Read each Surface
-                        for current_surface in range(bone_attribute_surfaces_count):
-                            R.goto(bone_attribute_surface_offset_array[current_surface])
-                            # surface_type = R.read_long_unsigned()
-                            # surface_header_length = R.read_long_unsigned()
-                            # surface_count = R.read_long_unsigned()
+                        bone_attribute_surface_offset_array = []
+                        for ______ in range(bone_attribute_surfaces_count):
+                            bone_attribute_surface_offset_array.append(R.read_long_unsigned())
+                        for current_surface_index, current_surface_offset in enumerate(bone_attribute_surface_offset_array):
+                            R.goto(current_surface_offset)
                             R.seek(12)
-                            surface_name__string_id = R.read_long_unsigned()
-                            surface_material_name__string_id = R.read_long_unsigned()
-                            # There is more to this header but I don't need the info... OR DO I??
-
-                            # Locate the material that this surface will use
-                            i = -1
-                            for i, mat in enumerate(model.materials):
-                                if mat.name == model.strings[surface_material_name__string_id]:
-                                    break
-
-                            model.surfaces.append(import_to_blender.Surface(model.strings[surface_name__string_id], i))
-                            if nep_tools.debug: print("        Surface %s: @ %s  mat=\"%s\"  tex=\"%s\"" % (current_surface, hex(bone_attribute_surface_offset_array[current_surface]),
-                                                                                                            model.strings[surface_name__string_id], model.strings[surface_material_name__string_id]))
+                            # The next 2 values from 'R.read_long_unsigned()' are 'Surface_Name_StringID' and 'Material_Name_StringID'
+                            S: import_to_blender.Surface = import_to_blender.Surface(model.strings[R.read_long_unsigned()], model.getMaterialByName(model.strings[R.read_long_unsigned()]))
+                            model.surfaces.append(S)
+                            if nep_tools.debug: print("        Surface %s: @ %s  mat=\"%s\"  tex=\"%s\"" % (current_surface_index, hex(current_surface_offset),
+                                                                                                            S.name, model.materials[S.material_index].name))
                     elif bone_attribute_type == 0x4D:  # Type 77 # Bone Attribute: Shape Keys
-                        if nep_tools.debug: print("      Bone Attribute Type 0x4D == 77  Shape Keys  @ %s" % hex(bone_attribute_offset_array[current_bone_attribute]).rjust(6))
+                        if nep_tools.debug: print("      Bone Attribute Type 0x4D == 77  Shape Keys  @ %s" % hex(current_bone_attribute_offset).rjust(6))
 
                     elif bone_attribute_type == 0x5C:  # Type 92 # Bone Attribute: Child Bone List
-                        if nep_tools.debug: print("      Bone Attribute Type 0x5C == 92  Child Bone List  @ %s" % hex(bone_attribute_offset_array[current_bone_attribute]).rjust(6))
+                        if nep_tools.debug: print("      Bone Attribute Type 0x5C == 92  Child Bone List  @ %s" % hex(current_bone_attribute_offset).rjust(6))
                     else:
-                        if nep_tools.debug: print("      Bone Attribute Type %s == %s  <not-implemented>  @ %s" % (hex(bone_attribute_type), bone_attribute_type, hex(bone_attribute_offset_array[current_bone_attribute]).rjust(6)))
+                        if nep_tools.debug: print("      Bone Attribute Type %s == %s  <not-implemented>  @ %s" % (hex(bone_attribute_type), bone_attribute_type, hex(current_bone_attribute_offset).rjust(6)))
                 model.bones.append(current_bone)
                 if nep_tools.debug: print(current_bone)
-                # After all bones are added, trim this list to cut down on a bit of proccessing
-            model.bones.trim()
+            model.bones.trim()  # After all bones are added, trim this list to cut down on a bit of proccessing
 
-        elif current_file_section_type == 0x32:  # 50 #
+        elif file_section_code == 0x32:  # 50 #
             R.seek(8)
             something_count = R.read_long_unsigned()
             if nep_tools.debug:
                 print("\n  File Section Type %s == %s   @ %s Something[Count:%s]  <not-implemented>" %
-                      (hex(file_section_type_array[current_file_section]), file_section_type_array[current_file_section],
-                       hex(current_file_section_offset), something_count))
+                      (hex(file_section_codes[file_section_index]), file_section_codes[file_section_index],
+                       hex(file_section_offset), something_count))
 
-        elif current_file_section_type == 0x0B:  # 11 # Object-Mesh Data Block
+        elif file_section_code == 0x0B:  # 11 # Object-Mesh
             # Object-Mesh Header 0: File Section Type
             #   Unused because it always equals file_section_type. It is duplicate data.
             # object_mesh_file_section_type = Never Used
+            # mesh_header_length = R.read_long_unsigned()
 
-            R.seek(4)  # Skip over unused variables listed above
-            mesh_header_length = R.read_long_unsigned()
+            R.seek(8)  # Skip over unused variables listed above
             object_mesh_attribute_count = R.read_long_unsigned()
 
             if nep_tools.debug:
-                print("\n  File Section Type %s == %s: Object[Mesh] @ %s  Attributes %s" % (hex(current_file_section_type), current_file_section_type, hex(current_file_section_offset), object_mesh_attribute_count))
+                print("\n  File Section Type %s == %s: Object[Mesh] @ %s  Attributes %s" % (hex(file_section_code), file_section_code, hex(file_section_offset), object_mesh_attribute_count))
 
             object_mesh_attribute_offset_array = []
             for current_object_mesh_attribute in range(object_mesh_attribute_count):
@@ -654,69 +649,42 @@ def read_ism2(filepath: str, filename: str,
                 R.goto(current_object_mesh_attribute_offset)
                 object_mesh_attribute_type = R.read_long_unsigned()
 
-                if object_mesh_attribute_type == 0xA:  # 10 # Mesh
-                    # mesh_header_length = R.read_long_unsigned()
+                if object_mesh_attribute_type == 0x0A:  # 10 # Mesh
                     R.seek(4)
                     mesh_section_count = R.read_long_unsigned()
-                    # mesh_header2 = R.read_long_unsigned()
-                    # mesh_header3 = R.read_long_unsigned()
-                    # mesh_header4 = R.read_long_unsigned()
-                    # mesh_header5 = R.read_long_unsigned()
-                    # mesh_header6 = R.read_long_unsigned()
-                    R.seek(20)  # skips the 5 unused header values
+                    R.seek(20)
 
                     if nep_tools.debug:
                         print("    Mesh Surfaces @ %s   Count %i" % (hex(current_object_mesh_attribute_offset), mesh_section_count))
 
                     mesh_section_offset_array = []
-                    for current_mesh_section in range(mesh_section_count):
+                    for current_mesh_section_index in range(mesh_section_count):
                         mesh_section_offset_array.append(R.read_long_unsigned())
 
-                    for current_mesh_section in range(mesh_section_count):
-                        current_mesh_section_offset = mesh_section_offset_array[current_mesh_section]
+                    for current_mesh_section_index in range(mesh_section_count):
+                        current_mesh_section_offset = mesh_section_offset_array[current_mesh_section_index]
                         R.goto(current_mesh_section_offset)
                         mesh_section_type = R.read_long_unsigned()
 
                         if mesh_section_type == 0x59:  # 89 # Mesh Surface Vertices
                             # vertex_blocks_header_length = R.read_long_unsigned()
-                            R.seek(4)
+                            R.seek(4)  # skip header length - it is always the same
                             vertex_blocks_count = R.read_long_unsigned()
                             vertex_type = R.read_short_unsigned()
-                            # vertex_blocks_header4 = R.read_short_unsigned()
-                            R.seek(2)
+                            R.seek(2)  # vertex_blocks_header4 = R.read_short_unsigned()   <unknown>
                             vertex_count = R.read_long_unsigned()
                             vertex_size = R.read_long_unsigned()
-                            # vertex_blocks_header7 = R.read_long_unsigned()
-                            R.seek(4)
+                            R.seek(4)  # vertex_blocks_header7 = R.read_long_unsigned()    <unknown>
 
                             if nep_tools.debug:
                                 print("      Mesh Surface: Vertices: Count %s  @ %s" % (vertex_blocks_count, hex(current_mesh_section_offset)))
 
-                            # POINTLESS CODE #
-                            # Scans through reading in variables but never using any of them
-                            # I'm going to go strait to the good stuff - after this comment block
-
-                            # vertex_blocks_offset_array = []
-                            # for current_vertex_block in range(vertex_blocks_count):
-                            #     vertex_blocks_offset_array.append(R.read_long_unsigned())
-                            #
-                            # for current_vertex_block in range(vertex_blocks_count):
-                            #     f.seek(vertex_blocks_offset_array[current_vertex_block])
-                            #     # vertex_header0 = R.read_long_unsigned()
-                            #     # vertex_header1 = R.read_long_unsigned()
-                            #     # vertex_header2a = R.read_short_unsigned()
-                            #     # vertex_header2b = R.read_short_unsigned()
-                            #     # vertex_header3 = R.read_long_unsigned()
-                            #     # vertex_header4 = R.read_long_unsigned()
-                            #     f.seek(20, 1)  # Skip unused values
-                            #     f.seek(R.read_long_unsigned())  # Vertex Start Offset
-
                             # All of these blocks have the same pointer, so it does not matter which one we use.
-                            R.goto(R.read_long_unsigned() + 20)  # goto last vertex block and Skip vertex block header
+                            R.goto(R.read_long_unsigned() + 20)  # goto last value of first vertex block
                             vertex_block_offset = R.read_long_unsigned()
                             R.goto(vertex_block_offset)
 
-                            if vertex_type == 0x1:  # Position, Normal 1 & 2, UV Mapping
+                            if vertex_type == 0x1:  # Position, Normal 1 & 2, UV Mapping, Vertex Color
                                 if nep_tools.debug:
                                     print("        Data @ %s" % hex(vertex_block_offset))
                                 for current_vertex_index in range(vertex_count):
@@ -787,7 +755,7 @@ def read_ism2(filepath: str, filename: str,
 
                         elif mesh_section_type == 0x46:  # 70 # Mesh Surface Indices
                             mesh_surface_header_length = R.read_long_unsigned()
-                            mesh_surface_section_count = R.read_long_unsigned()
+                            mesh_section_surface_count = R.read_long_unsigned()
                             mesh_surface_name_index = R.read_long_unsigned()
                             mesh_surface_section_blank = R.read_long_unsigned()
                             mesh_surface_section_header4 = R.read_short_unsigned()
@@ -807,15 +775,15 @@ def read_ism2(filepath: str, filename: str,
 
                             if nep_tools.debug:
                                 print("      Mesh Surface: Indices @ %s  SectionCount %s  FaceLoopCount %s   Blank: %s   Header4: %s   Header5: %s   Surface: %s" % (
-                                    hex(current_mesh_section_offset), mesh_surface_section_count, face_loop_count,
+                                    hex(current_mesh_section_offset), mesh_section_surface_count, face_loop_count,
                                     mesh_surface_section_blank, mesh_surface_section_header4, mesh_surface_section_header5, mesh_surface_object.name if hasattr(mesh_surface_object, 'name') else "\'noName\'"))
 
-                            mesh_surface_section_offset_array = []
-                            for mesh_surface_section_current in range(mesh_surface_section_count):
-                                mesh_surface_section_offset_array.append(R.read_long_unsigned())
+                            mesh_section_surface_offset_array = []
+                            for mesh_section_surface_current_index in range(mesh_section_surface_count):
+                                mesh_section_surface_offset_array.append(R.read_long_unsigned())
 
-                            for mesh_surface_section_current in range(mesh_surface_section_count):
-                                mesh_surface_section_current_offset = mesh_surface_section_offset_array[mesh_surface_section_current]
+                            for mesh_section_surface_current_index in range(mesh_section_surface_count):
+                                mesh_surface_section_current_offset = mesh_section_surface_offset_array[mesh_section_surface_current_index]
                                 R.goto(mesh_surface_section_current_offset)
                                 mesh_surface_section_type = R.read_long_unsigned()
 
@@ -832,15 +800,30 @@ def read_ism2(filepath: str, filename: str,
                                         print("        Face Loops (Triangles) @ %s   Type1 %s  Type2 %s  Blank=%s " % (
                                             hex(mesh_surface_section_current_offset), face_loops_type, face_loops_type2, face_loops_blank))
 
+                                    # Determine Face Loop Type
+                                    face_vertex_count: int = 3  # default
                                     if face_loops_type == 0x05:
-                                        for i in range(int(face_loops_count / 3)):
-                                            model.faces.append(import_to_blender.Face((R.read_short_unsigned(), R.read_short_unsigned(), R.read_short_unsigned()), mesh_surface_index))
+                                        def readVerticies() -> (int,):
+                                            return R.read_short_unsigned(), R.read_short_unsigned(), R.read_short_unsigned()
                                     elif face_loops_type == 0x07:
-                                        for i in range(int(face_loops_count / 3)):
-                                            model.faces.append(import_to_blender.Face((R.read_long_unsigned(), R.read_long_unsigned(), R.read_long_unsigned()), mesh_surface_index))
+                                        def readVerticies() -> (int,):
+                                            return R.read_long_unsigned(), R.read_long_unsigned(), R.read_long_unsigned()
                                     else:
-                                        if nep_tools.debug:
-                                            print("        Face Loop Type: <not implemented>  @ %s" % mesh_surface_section_current_offset)
+                                        def readVerticies() -> (int,):  # IF the 'face_loop_type' is unknown THEN use this as a default AND report the situation with the print function
+                                            return R.read_long_unsigned(), R.read_long_unsigned(), R.read_long_unsigned()
+
+                                        print("        Face Loop Type: <not implemented>  @ %s" % mesh_surface_section_current_offset)
+
+                                    # Read verticies based on the Face Loop Type
+                                    face_indicies: (int,)
+                                    material_index_local = model.surfaces[mesh_surface_index].material_index
+                                    for i in range(int(face_loops_count / face_vertex_count)):
+                                        face_indicies = readVerticies()
+                                        if 0 <= material_index_local < len(model.materials):  # Avoid index-out-of-bounds. Also some surface have no material assigned SO the material_index will be -1
+                                            for VI in face_indicies:
+                                                if any(VC != 1 for VC in model.vertices[VI].rgba):  # IF any vertex-color-value is not 1 THEN vertex coloring should be enabled in Blender
+                                                    model.materials[material_index_local].enable_vertex_coloring = True
+                                        model.faces.append(import_to_blender.Face(face_indicies, mesh_surface_index))
 
                                 elif mesh_surface_section_type == 0x6E:  # 110 # Mesh Surface Bounding Box
                                     if option_parse_bounding_boxes:
@@ -1026,18 +1009,18 @@ def read_ism2(filepath: str, filename: str,
         else:
             if nep_tools.debug:
                 print("\n  File Section Type %s == %s   @ %s  <not-implemented>" % (
-                    hex(file_section_type_array[current_file_section]),
-                    file_section_type_array[current_file_section],
-                    hex(current_file_section_offset)))
+                    hex(file_section_codes[file_section_index]),
+                    file_section_codes[file_section_index],
+                    hex(file_section_offset)))
     R.close()
 
     # Stored is a seperate file called face.anm (in the same directory)
     if option_parse_face_anm:
-        model.face_anm = parse_face_anm(filepath + "face.anm")
+        model.face_anm = parse_face_anm(filedirectory + "face.anm")
 
     # Stored as a list of files inside the "motion" directory
     if option_parse_motion:
-        parse_motion(filepath + "motion\\")
+        parse_motion(filedirectory + "motion\\")
 
     return model
 
@@ -1182,40 +1165,4 @@ def parse_face_anm(filepath: str) -> import_to_blender.FaceAnm:  # returns None 
 
 if __name__ == "__main__":
     nep_tools.debug = True
-
-    # read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Neptunia Rebirth2\\data\\game\\model\\accessory\\050\\", "head.ism2")
-
-    # read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Neptunia Rebirth2\\data\\game\\model\\chara\\044", "002.ism2")
-
-    # read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\CONTENTS\\GAME00001\\model\\chara\\052\\", "002.ism2")
-
-    read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Megadimension Neptunia VII\\CONTENTS\\GAME00001\\model\\chara\\041\\", "002.ism2")
-
-    # read_file_ism2("C:\\Z\\3\\072\\", "002.ism2")
-
-    # read_file_ism2("C:\\Z\\4\\818 - SignGirl\\", "002 - SignGirl.ism2")
-    # read_ism2("C:\\Z\\4\\818 - SignGirl\\motion\\base\\", "m001.ism2")
-    # read_file_ism2("c:\\Z\\4\\303 - Purple Heart NEXT\\", "002.ism2")
-
-    # parse_amature_animation("C:\\Z\\4\\303 - Purple Heart Next\\motion\\410\\")
-
-    # read_file_ism2("C:\\Z\\4\\333 - Green Heart NEXT\\", "002.ism2")
-    # parse_face_anims("C:\\Z\\4\\333 - Green Heart NEXT\\face.anm")
-
-    # parse_face_anims("C:\\Z\\4\\051 - Uni\\face.anm")
-    # read_file_ism2("C:\\Z\\4\\051 - Uni\\", "002 - Uni.ism2")
-    # read_file_ism2("C:\\Z\\4\\351 - Black Sister\\", "002.ism2")
-
-    # parse_face_anims("C:\\Z\\4\\351 - Black Sister\\face.anm")
-
-    # read_file_ism2("C:\\Z\\4\\081 - Uzume\\motion\\001\\", "m001.ism2")
-
-    # read_file_ism2("C:\\Z\\4\\381 - Orange Heart\\", "002 - Orange Heart.ism2")
-    # read_file_ism2("C:\\Z\\1\\081\\", "002.ism2")  # Compa  # ERROR Model is too BIG
-    # read_file_ism2("C:\\Z\\3\\241\\", "002.ism2")  # Plutia
-    # read_file_ism2("C:\\Z\\2\\044\\", "002.ism2")
-
-    # read_file_ism2("C:\\Z\\4\\818 - SignGirl\\", "002 - SignGirl.ism2")
-
-    # read_file_ism2("C:\\Z\\S\\061\\", "002.ism2")  #
-    # read_file_ism2("C:\\Z\\S\\330\\", "002.ism2")  # Pixel Vader
+    read_ism2("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Superdimension Neptune VS Sega Hard Girls\\data\\GAME200000\\model\\chara\\101", "002.ism2")
